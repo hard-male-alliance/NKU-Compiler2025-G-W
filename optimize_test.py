@@ -2,6 +2,13 @@ import argparse
 import subprocess
 import os
 
+# Use the installed LLVM toolchain and the same rebuilt runtime as test.py.
+CLANG = os.environ.get("CLANG", "clang")
+RUNTIME_DIR = os.environ.get(
+    "SYSY_RUNTIME_DIR",
+    ".cache/build/default/lib" if os.path.isdir(".cache/build/default/lib") else "lib"
+)
+
 def execute(command):
     return subprocess.run(command, capture_output=True, text=True)
 
@@ -46,12 +53,12 @@ def execute_ir(input,output,opt,stdin,stdout,testout):
         print("\033[93mCompile Error on \033[0m"+input)
         return 0
     
-    result = execute(["clang-15",output,"-c","-o","tmp.o","-w"])
+    result = execute([CLANG,output,"-c","-o","tmp.o","-w"])
     if(result.returncode != 0):
         print("\033[93mOutPut Error on \033[0m"+input)
         return 0
         
-    result = execute(["clang-15","-static","tmp.o","lib/libsysy_x86.a"])
+    result = execute([CLANG,"-static","tmp.o",os.path.join(RUNTIME_DIR,"libsysy_x86.a")])
     if(result.returncode != 0):
         result = execute(["rm","-rf","tmp.o"])
         print("\033[93mLink Error on \033[0m"+input)

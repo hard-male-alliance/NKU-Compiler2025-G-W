@@ -1,0 +1,153 @@
+WSL environment and CMake migration -- 2026-10-15
+================================================
+
+Scope
+-----
+Deliver an installed WSL build environment, a target-oriented CMake build,
+and C++23 as the default, with explicit C++20/C++17 fallback configurations.
+Compiler-lab implementation is not part of this migration. Existing grammar
+and code-generation placeholders remain outside the build-system scope.
+
+Installed environment
+---------------------
+WSL distribution: Ubuntu-24.04, reporting Ubuntu 24.04.5 LTS, x86_64.
+GCC/G++ 13.3.0; Clang/LLVM 18.1.3; CMake 3.28.3; Ninja 1.11.1;
+Bison 3.8.2; Flex 2.6.4; Python 3.12.3.
+Build essentials, libfl-dev, clang-format, GDB, gdb-multiarch, Valgrind,
+qemu-user, AArch64 Linux GCC/libc headers and RISC-V Linux GCC/libc headers
+are installed. gcc-riscv64-unknown-elf was also installed during exploration,
+but is not a prerequisite or the default Linux test toolchain.
+Installation used WSL's root account; the normal user's passwordless sudo is
+not enabled and no sudo policy was changed.
+Reproduction: sudo sh scripts/setup-wsl.sh on Ubuntu 24.04.
+
+Architecture decisions
+----------------------
+1. CMake 3.25 is the minimum, matching preset schema version 6. Ninja presets
+   use separate .cache/build/<preset> trees. CMAKE_CXX_STANDARD defaults to
+   23, is required, and extensions are disabled. Only explicit 20 or 17
+   selection lowers the language standard; unsupported choices fail early.
+2. Root CMake orchestrates interfaces, utils, frontend, middleend, backend,
+   lib and tests. Explicit source lists replace shell find-based discovery.
+   A shared INTERFACE target carries includes, LOCAL_TEST and diagnostics.
+3. Compiler components are OBJECT libraries rather than ordinary static
+   archives. Both backends register themselves through static constructors;
+   object linking preserves these translation units without whole-archive
+   flags. A registry executable tests both factories and unknown targets.
+4. Generated sources live under <build>/generated/frontend/parser, preserving
+   existing include names. Bison is invoked with an explicit three-output
+   custom command: yacc.cpp, yacc.h, location.hh. FindBISON's convenience
+   helper does not track the location header. Flex generation depends on
+   yacc.h, and consumers explicitly wait for generation.
+5. Handwritten C++ retains -Wall -Wextra -Wpedantic -Werror and the original
+   unused-parameter exemption. One Clang unused-counter exemption is scoped
+   only to Bison's generated yacc.cpp. The unused AArch64 frame-size placeholder
+   is explicitly annotated maybe_unused rather than hiding warnings globally.
+6. Normal builds do not overwrite source-tree binaries or runtime archives.
+   Makefile is a compatibility wrapper: make publishes bin/compiler via
+   legacy-compiler. make libarm/librv explicitly publish the corresponding
+   archive to the old location. Other configurations remain isolated.
+7. The C runtime is rebuilt as a host static library and optionally as Linux
+   AArch64/RV64 archives, without changing the host compiler. Cross tools are
+   cache-configurable and are not required for a host-only compiler build.
+   sysy_runtimes aggregates all available runtimes in normal builds and the
+   legacy-compiler workflow. Test drivers and link helpers prefer the default
+   build's runtime directory, with SYSY_RUNTIME_DIR overrides and the old lib
+   directory as a fallback. This avoids mixing the bundled Newlib RISC-V
+   archive (which references _impure_ptr) with Linux libc. The optimization
+   driver uses the installed clang, configurable via CLANG, not clang-15.
+8. LF attributes protect shell entry points and CMake/Make files on Windows
+   checkouts. Existing sylib.c CRLF style is preserved to avoid a file-wide
+   formatting diff; whitespace validation uses cr-at-eol accordingly.
+
+Necessary compatibility repairs
+-------------------------------
+The original TODO and ERROR macros only used assert(false). RelWithDebInfo
+defines NDEBUG, allowing those functions to fall through. Both macros now
+unconditionally abort after diagnostics, preserving fatal behavior in all
+configurations. A dedicated executable is tested with NDEBUG explicitly set.
+
+sylib.h declared the timer state, but sylib.c did not define it. Rebuilding
+and linking the runtime exposed unresolved symbols. The state is now defined
+once in sylib.c, keeping the public symbol names/types unchanged. The runtime
+test covers getint/putint/putch and starttime/stoptime, not merely archiving.
+
+The old default bare-metal RISC-V toolchain lacks the Linux libc expected by
+sylib and QEMU user mode. Linux GCC is now the default in toolchains.conf,
+rv2bin.sh and test.py. Its startup objects cannot statically link at the old
+0x90000000 text address (R_RISCV_HI20 relocation overflow). 0x10000 also
+overlapped ELF notes. The validated default is 0x20000, within the medlow
+range and clear of headers/notes; toolchains.conf remains configurable.
+
+Validation and evidence
+-----------------------
+Every following preset configured, built and passed all three CTest tests:
+  default: GCC 13, C++23, RelWithDebInfo
+  debug:   GCC 13, C++23, Debug
+  clang:   Clang 18, C++23, RelWithDebInfo
+  cpp20:   GCC 13, C++20, RelWithDebInfo
+  cpp17:   GCC 13, C++17, RelWithDebInfo
+
+The tests cover actual process exits and diagnostics for invalid CLI input,
+file-based lexer output with spaces in filenames, rebuilt runtime I/O/timing,
+NDEBUG TODO/ERROR termination, and both backend registrations.
+When the installed Linux cross tools, LLVM and QEMU are available, the third
+test also covers all three link helpers and test.py's host/AArch64/RV64
+link-execute-compare paths. Known LLVM/assembly inputs isolate environment
+correctness from incomplete SysY compilation. Without cross tools only the
+two host build-integration tests are registered.
+
+make clean followed by make test JOBS=4 rebuilt successfully. A following
+cmake --build --preset default reported no work to do. Deleting only the
+generated location.hh and rebuilding reran Bison and restored the header.
+All tracked C++ translation units appear in compile_commands.json. All 70
+C++ compile entries in the default build use -std=c++23 and -Werror; fallback
+trees use exactly -std=c++20 or -std=c++17. No parser-generation artifacts
+were created in frontend/parser. Checked-in runtime archives were not changed.
+
+Both cross-runtime CMake targets built from source. Their linked static
+executables ran under qemu-aarch64 and qemu-riscv64: input 41, output 42,
+exit zero, and timing diagnostics emitted. Reproduction after default build:
+  cmake --build --preset default --target sysy_runtime_aarch64 sysy_runtime_riscv64
+  aarch64-linux-gnu-gcc -static tests/runtime_smoke.c -Ilib \
+    .cache/build/default/lib/libsysy_aarch.a -o .cache/build/default/tests/runtime-aarch64
+  riscv64-linux-gnu-gcc -static -mcmodel=medany tests/runtime_smoke.c -Ilib \
+    .cache/build/default/lib/libsysy_riscv.a -Wl,--no-relax,-Ttext=0x20000 \
+    -o .cache/build/default/tests/runtime-riscv64
+  printf '41\n' | qemu-aarch64 .cache/build/default/tests/runtime-aarch64
+  printf '41\n' | qemu-riscv64 .cache/build/default/tests/runtime-riscv64
+Wrapped commands above are single logical shell commands.
+
+Installed llvm-as also assembled a handwritten LLVM module calling getint,
+putint and putch. clang statically linked it with the provided x86 runtime;
+execution with input 41 printed 42 and returned zero. This checks the LLVM
+tool installation independently of unfinished SysY IR generation.
+
+All three existing link helpers were also exercised against the new runtime
+selection: arm2bin.sh, rv2bin.sh and ll2bin.sh produced executables that printed
+42 for input 41. Cross-architecture inputs were assembly generated by the
+installed GCC tools, not by the incomplete SysY compiler. The helpers now
+stop on link failures instead of printing false success. ll2bin.sh also uses
+the correct LLVM-input object basename.
+
+Local logs: .cache/build/{preset}-build.log and {preset}-test.log where
+available, clean-rebuild.log, and header-recovery.log. These are ignored,
+reproducible local artifacts, not checked-in build products.
+
+Known limitations and non-goals
+------------------------------
+The existing grammar's 26 shift/reduce and 95 reduce/reduce conflicts remain
+visible. Compiler semantic/codegen TODOs remain unimplemented. Passing CTest
+does not claim the 200 SysY functional programs pass. Existing scanf return
+value warnings in the teaching C runtime remain visible; the strict compiler
+C++ policy does not apply to that separate C runtime target. Native Windows
+builds and every C++23 library feature are not claimed: the supported and
+verified development workflow is WSL/Linux using the listed compilers.
+
+References
+----------
+https://cmake.org/cmake/help/v3.28/manual/cmake-presets.7.html
+https://cmake.org/cmake/help/v3.28/manual/cmake-buildsystem.7.html
+https://cmake.org/cmake/help/v3.28/module/FindBISON.html
+https://cmake.org/cmake/help/v3.28/module/FindFLEX.html
+https://llvm.org/docs/TestingGuide.html

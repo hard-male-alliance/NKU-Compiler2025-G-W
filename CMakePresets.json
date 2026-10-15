@@ -1,0 +1,60 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/.cache/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_CXX_STANDARD": "23",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "default",
+      "displayName": "C++23 development build",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+    {
+      "name": "debug",
+      "displayName": "C++23 debug build",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "clang",
+      "displayName": "C++23 Clang development build",
+      "inherits": "default",
+      "cacheVariables": { "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++" }
+    },
+    {
+      "name": "cpp20",
+      "displayName": "Explicit C++20 fallback",
+      "inherits": "default",
+      "cacheVariables": { "CMAKE_CXX_STANDARD": "20" }
+    },
+    {
+      "name": "cpp17",
+      "displayName": "Explicit C++17 fallback",
+      "inherits": "default",
+      "cacheVariables": { "CMAKE_CXX_STANDARD": "17" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "default", "configurePreset": "default", "jobs": 4 },
+    { "name": "debug", "configurePreset": "debug", "jobs": 4 },
+    { "name": "clang", "configurePreset": "clang", "jobs": 4 },
+    { "name": "cpp20", "configurePreset": "cpp20", "jobs": 4 },
+    { "name": "cpp17", "configurePreset": "cpp17", "jobs": 4 }
+  ],
+  "testPresets": [
+    { "name": "default", "configurePreset": "default", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
+    { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
+    { "name": "clang", "configurePreset": "clang", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
+    { "name": "cpp20", "configurePreset": "cpp20", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } },
+    { "name": "cpp17", "configurePreset": "cpp17", "output": { "outputOnFailure": true }, "execution": { "noTestsAction": "error" } }
+  ]
+}

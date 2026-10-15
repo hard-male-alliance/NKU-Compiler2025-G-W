@@ -6,6 +6,9 @@ test.s
 test.bin
 test_output
 .cache
+.temp
+/build/
+/CMakeUserPresets.json
 frontend/parser/location.hh
 frontend/parser/lexer.cpp
 frontend/parser/lexer.h

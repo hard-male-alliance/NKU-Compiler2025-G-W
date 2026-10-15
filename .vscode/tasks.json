@@ -10,7 +10,7 @@
                 "isDefault": true
             },
             "problemMatcher": ["$gcc"],
-            "detail": "Task to build the project using Makefile"
+            "detail": "Configure C++23 with CMake and publish bin/compiler (run in WSL)"
         }
     ]
 }

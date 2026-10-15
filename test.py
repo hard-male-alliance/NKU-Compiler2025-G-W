@@ -28,14 +28,21 @@ TESTCASES_DIR = "testcase/functional"
 TEST_OUTPUT_DIR = "test_output"
 TOOLCHAINS_CONF = "toolchains.conf"
 
+# Prefer rebuilt Linux runtimes; retain old standalone layouts and explicit overrides.
+RUNTIME_DIR = os.environ.get(
+    "SYSY_RUNTIME_DIR",
+    ".cache/build/default/lib" if os.path.isdir(".cache/build/default/lib") else "lib"
+)
+
 IR_TIMEOUT = "30"
 ASM_TIMEOUT = "60"
 
 MAX_FILENAME_LEN = 0
 
-RISCV_GCC = "riscv64-unknown-elf-gcc"
-RISCV_AR = "riscv64-unknown-elf-ar"
-TEXT_ADDR = "0x90000000"
+# Match toolchains.conf: the runtime and QEMU runner require Linux libc.
+RISCV_GCC = "riscv64-linux-gnu-gcc"
+RISCV_AR = "riscv64-linux-gnu-ar"
+TEXT_ADDR = "0x20000"
 
 
 def load_toolchains_config():
@@ -162,7 +169,7 @@ def _compile_ir_and_link(target_file: str, src_file: str, test_name: str):
 
     print_test_status(test_name, "Linking object to exec")
     res = subprocess.run([
-        "clang", "tmp.o", "-o", "tmp.bin", "-static", "-L./lib", "-lsysy_x86"
+        "clang", "tmp.o", "-o", "tmp.bin", "-static", f"-L{RUNTIME_DIR}", "-lsysy_x86"
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     subprocess.run(["rm", "tmp.o"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     if res.returncode != 0:
@@ -251,7 +258,7 @@ def _compile_asm_and_link_riscv(target_file: str, src_file: str, test_name: str)
     # Link .o to executable
     res = subprocess.run([
         RISCV_GCC, "tmp.o", "-o", "tmp.bin",
-        "-L./lib", "-lsysy_riscv",
+        f"-L{RUNTIME_DIR}", "-lsysy_riscv",
         "-static", "-mcmodel=medany",
         f"-Wl,--no-relax,-Ttext={TEXT_ADDR}"
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
@@ -341,7 +348,7 @@ def _compile_asm_and_link_arm(target_file: str, src_file: str, test_name: str):
     # Link .o to executable
     res = subprocess.run([
         "aarch64-linux-gnu-gcc", "tmp.o", "-o", "tmp.bin",
-        "-L./lib", "-lsysy_aarch", "-static"
+        f"-L{RUNTIME_DIR}", "-lsysy_aarch", "-static"
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     subprocess.run(["rm", "tmp.o"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     if res.returncode != 0:

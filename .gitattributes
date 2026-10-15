@@ -1,0 +1,5 @@
+# Keep WSL shell entry points executable by interpreters after Windows checkouts.
+*.sh text eol=lf
+Makefile text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf

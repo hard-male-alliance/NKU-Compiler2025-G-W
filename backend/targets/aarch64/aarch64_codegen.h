@@ -19,7 +19,8 @@ namespace BE::AArch64
         std::ostream& out_;
 
         BE::Function* cur_func_       = nullptr;
-        int           cur_stack_size_ = 0;
+        /// Reserved for the frame-size handling implemented in the backend lab.
+        [[maybe_unused]] int cur_stack_size_ = 0;
 
         void emitFunction(BE::Function* func);
         void emitBlock(BE::Block* block);

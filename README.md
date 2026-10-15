@@ -38,12 +38,73 @@
 
 ### 1.编译
 
+构建系统使用 CMake 3.25+ 和 Ninja，默认启用 **C++23**，已在 WSL Ubuntu
+24.04 的 GCC 13 / Clang 18 上验证。请在 WSL 终端（或 VS Code 的 WSL
+远程窗口）中执行以下命令，不要混用 Windows 和 Linux 工具链。
+
 ```bash
-# 编译你的代码，链接生成可执行文件compiler
-make 
-# 清除编译产物
-make clean
+# 首次安装依赖：包含 Flex/Bison、LLVM、调试器、两种 Linux 交叉工具链和 QEMU。
+sudo sh scripts/setup-wsl.sh
+
+# 推荐流程：配置、构建、构建集成冒烟测试。
+cmake --preset default
+cmake --build --preset default
+ctest --preset default
+
+# 使用新构建的编译器；所有生成文件都留在构建目录中。
+./.cache/build/default/bin/compiler -lexer -o .cache/tokens.txt testcase/lexer/simple.sy
 ```
+
+预设构建目录为 `.cache/build/<preset>/`，其中包含 `bin/compiler`、生成的
+解析器、运行库及 `compile_commands.json`。源目录不会生成 `yacc.cpp` 等文件；
+增量构建和并行构建由 CMake/Ninja 管理，不会自动格式化生成代码。
+
+| 预设 | 用途 |
+| --- | --- |
+| `default` | 默认 C++23，优化并保留调试信息 |
+| `debug` | C++23，无优化调试配置 |
+| `clang` | 显式使用 Clang 的 C++23 配置 |
+| `cpp20` / `cpp17` | 旧工具链的显式语言标准回退，独立构建目录 |
+
+例如切换 Clang：`cmake --preset clang && cmake --build --preset clang && ctest --preset clang`。
+回退时将 `clang` 换为 `cpp20` 或 `cpp17`；不会静默降低所选标准。
+也可自行配置，例如 `cmake -S . -B .cache/build/custom -G Ninja -DCMAKE_CXX_STANDARD=20`。
+项目默认保持严格警告和 `-Werror`，必要时可显式配置 `-DSYSY_WARNINGS_AS_ERRORS=OFF`。
+
+原来的 Makefile 命令仍作为 CMake 的兼容入口：
+
+```bash
+# 默认构建，并将编译器复制到 ./bin/compiler，兼容现有测试脚本与调试配置。
+make
+# 指定构建并行度；切换预设时会使用独立构建目录。
+make PRESET=debug JOBS=4
+# 构建并运行 CTest。
+make test
+# 清理当前预设产物和兼容入口；保留配置缓存。
+make clean
+# 按需重新生成解析器，或重建并发布原路径下的交叉运行库。
+make lexer
+make libarm
+make librv
+```
+
+`make libarm/librv` 会更新 `lib/` 中对应的运行库；若只希望生成到构建目录，使用
+`cmake --build --preset default --target sysy_runtime_aarch64 sysy_runtime_riscv64`。
+Linux 交叉运行库使用 `aarch64-linux-gnu-gcc` 和 `riscv64-linux-gnu-gcc`，
+而非缺少 Linux libc 的裸机工具链。CMake 的 `SYSY_AARCH64_CC/AR`、
+`SYSY_RISCV_CC/AR` 缓存变量可覆盖交叉编译器和归档器路径；原脚本继续读取 `toolchains.conf`。
+正常构建也会重建已安装交叉工具链对应的运行库。`test.py` 和三个 `*2bin.sh`
+优先链接 `.cache/build/default/lib`，不存在该目录时回退到原来的 `lib/`；
+切换预设可设置 `SYSY_RUNTIME_DIR=.cache/build/debug/lib`。仓库附带的旧 RISC-V
+二进制库依赖 Newlib，不能直接与 Linux libc 混用，因此默认使用源码重建的库。
+RISC-V 默认代码地址改为 `0x20000`，兼容发行版 Linux 启动对象的寻址范围，且避开
+ELF 头和 note 段；原 `0x90000000` 会让该工具链的静态链接产生重定位溢出。
+
+**测试范围说明：** CTest 检查命令行错误处理、文件路径含空格的词法输出、后端注册、
+源码重建运行库的输入输出以及关闭断言时的致命诊断。完整 WSL 环境还会检查三个
+链接辅助脚本和 `test.py` 的宿主/AArch64/RV64 链接、执行、答案比较路径。
+这些环境测试使用已知 IR/汇编输入，不代表各实验已完成；
+框架文法的占位规则和既有 Bison 冲突仍存在，功能测试应在实现相应实验后运行。
 
 ### 2.运行你的样例程序
 

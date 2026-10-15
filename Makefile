@@ -1,99 +1,49 @@
-INC_DIR := . interfaces utils
-SRC_DIR := frontend middleend backend interfaces utils
-OBJ_DIR := obj
-BIN_DIR := bin
+# Compatibility entry points; CMake owns source lists and dependency tracking.
+.DEFAULT_GOAL := all
+CMAKE ?= cmake
+PRESET ?= default
+JOBS ?= 4
+CMAKE_ARGS ?=
+BUILD_DIR := .cache/build/$(PRESET)
 
-CXX ?= clang++
-INCLUDES = $(addprefix -I, $(INC_DIR))
-CXX_STANDARD = -std=c++17
-DBGFLAGS = -g
-WERROR_FLAGS := -Wall -Wextra -Wpedantic -Werror
-WARN_IGNORE := -Wno-unused-parameter
-CUSTOM_FLAGS := -DLOCAL_TEST
-CXXFLAGS = -O2 -MMD -MP $(CXX_STANDARD) $(INCLUDES) $(WERROR_FLAGS) $(DBGFLAGS) $(WARN_IGNORE) $(CUSTOM_FLAGS)
+# Respect an explicit compiler without inheriting make's built-in g++.
+ifneq ($(filter command line environment override,$(origin CXX)),)
+CMAKE_ARGS += -DCMAKE_CXX_COMPILER="$(CXX)"
+endif
 
--include toolchains.conf
-RISCV_GCC ?= riscv64-unknown-elf-gcc
-RISCV_AR  ?= riscv64-unknown-elf-ar
+.PHONY: all configure test clean clean-lexer lexer format libarm librv
 
-SOURCES = $(shell find $(SRC_DIR) -name "*.cpp" -type f)
-MAIN_SRC = main.cpp
+all: configure
+	$(CMAKE) --build --preset $(PRESET) --parallel $(JOBS) --target legacy-compiler
 
-OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(SOURCES))
-MAIN_OBJ = $(OBJ_DIR)/main.o
-GEN_SRCS = $(BISON_C) $(LEXER_C)
-GEN_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(GEN_SRCS))
-ALL_OBJECTS = $(OBJECTS) $(GEN_OBJECTS) $(MAIN_OBJ)
+configure:
+	$(CMAKE) --preset $(PRESET) $(CMAKE_ARGS)
 
-TARGET = $(BIN_DIR)/compiler
+test: all
+	$(CMAKE) --build --preset $(PRESET) --parallel $(JOBS)
+	ctest --preset $(PRESET)
 
-PARSER_DIR = frontend/parser
-LEXER_SRC  = $(PARSER_DIR)/lexer.l
-BISON_SRC = $(PARSER_DIR)/yacc.y
-
-LEXER_C    = $(LEXER_SRC:.l=.cpp)
-BISON_H   = $(BISON_SRC:.y=.h)
-BISON_C   = $(BISON_SRC:.y=.cpp)
-LOC_H     = $(PARSER_DIR)/location.hh
-
-LEXER_FILES = $(LEXER_C) $(BISON_H) $(BISON_C) $(LOC_H)
-
-SOURCES := $(filter-out $(GEN_SRCS), $(SOURCES))
-
-all: $(LEXER_FILES) $(TARGET)
-
-$(OBJ_DIR) $(BIN_DIR):
-	@mkdir -p $@
-
-$(OBJ_DIR)/%/:
-	@mkdir -p $@
-
-$(TARGET): $(ALL_OBJECTS) | $(BIN_DIR)
-	@echo "Linking object files -> $@"
-	@$(CXX) $(ALL_OBJECTS) -o $@
-
-$(OBJ_DIR)/main.o: main.cpp | $(OBJ_DIR)
-	@echo "Compiling main.cpp -> $(OBJ_DIR)/main.o"
-	@$(CXX) $(CXXFLAGS) -c $< -o $@
-
-$(OBJ_DIR)/%.o: %.cpp | $(OBJ_DIR)
-	@mkdir -p $(dir $@)
-	@echo "Compiling $< -> $@"
-	@$(CXX) $(CXXFLAGS) -c $< -o $@
-
-$(GEN_OBJECTS): $(LEXER_FILES)
-
--include $(ALL_OBJECTS:.o=.d)
-
-$(BISON_H) $(BISON_C) $(LOC_H): $(BISON_SRC)
-	@bison -d --language=c++ --defines=$(BISON_H) -o $(BISON_C) $(BISON_SRC)
-	@if [ -f $(BISON_H) ]; then clang-format -i $(BISON_H); fi
-	@if [ -f $(BISON_C) ]; then clang-format -i $(BISON_C); fi
-	@if [ -f $(LOC_H) ]; then clang-format -i $(LOC_H); fi
-
-$(LEXER_C): $(LEXER_SRC) $(BISON_H)
-	@flex --c++ --outfile=$(LEXER_C) $(LEXER_SRC)
-	@if [ -f $(LEXER_C) ]; then clang-format -i $(LEXER_C); fi
-
+# Build-system clean preserves caches and never removes source directories.
 clean:
-	rm -rf $(OBJ_DIR) $(BIN_DIR)
+	@if [ -f "$(BUILD_DIR)/CMakeCache.txt" ]; then $(CMAKE) --build "$(BUILD_DIR)" --target clean; fi
+	$(CMAKE) -E rm -f bin/compiler
+
+lexer: configure
+	$(CMAKE) --build --preset $(PRESET) --target sysy_parser_generated
 
 clean-lexer:
-	rm -f $(LEXER_FILES)
+	$(CMAKE) -E rm -f $(addprefix $(BUILD_DIR)/generated/frontend/parser/,lexer.cpp yacc.cpp yacc.h location.hh)
 
-lexer: $(LEXER_FILES)
-
+# Restrict formatting to project sources, not generated build trees.
 format:
-	@find . -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" -o -name "*.hh" \) -exec clang-format -i {} +
+	@find frontend middleend backend interfaces utils lib tests -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.c' -o -name '*.hpp' -o -name '*.hh' \) -exec clang-format -i {} +
+	clang-format -i main.cpp
 
-.PHONY: all clean clean-lexer lexer format libarm librv
+# Preserve explicit legacy runtime publishing; CMake builds stay isolated.
+libarm: configure
+	$(CMAKE) --build --preset $(PRESET) --target sysy_runtime_aarch64
+	$(CMAKE) -E copy_if_different $(BUILD_DIR)/lib/libsysy_aarch.a lib/libsysy_aarch.a
 
-libarm:
-	@aarch64-linux-gnu-gcc lib/sylib.c -c -o libtmp.o -Ilib
-	@aarch64-linux-gnu-ar rcs lib/libsysy_aarch.a libtmp.o
-	@rm libtmp.o
-
-librv:
-	@$(RISCV_GCC) lib/sylib.c -c -o libtmp.o -Ilib -mcmodel=medany
-	@$(RISCV_AR) rcs lib/libsysy_riscv.a libtmp.o
-	@rm libtmp.o
+librv: configure
+	$(CMAKE) --build --preset $(PRESET) --target sysy_runtime_riscv64
+	$(CMAKE) -E copy_if_different $(BUILD_DIR)/lib/libsysy_riscv.a lib/libsysy_riscv.a

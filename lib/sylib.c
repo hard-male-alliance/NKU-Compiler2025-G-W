@@ -2,6 +2,16 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <sys/time.h>
+
+/** Timing state is defined once here; sylib.h only declares the public symbols. */
+struct timeval _sysy_start, _sysy_end;
+/** Source line pairs recorded by starttime/stoptime. */
+int _sysy_l1[_SYSY_N], _sysy_l2[_SYSY_N];
+/** Accumulated timer components; element zero holds the total. */
+int _sysy_h[_SYSY_N], _sysy_m[_SYSY_N], _sysy_s[_SYSY_N], _sysy_us[_SYSY_N];
+/** Next timer slot; initialized by before_main. */
+int _sysy_idx;
+
 /* Input & output functions */
 int getint()
 {

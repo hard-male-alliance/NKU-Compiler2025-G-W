@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <assert.h>
+#include <cstdlib>
 #include <stdio.h>
 
 #ifndef ERROR
@@ -17,7 +18,8 @@
         std::cerr << "\033[0;33;1m";                                                   \
         std::cerr << "File: \033[4;37;1m" << __FILE__ << ":" << __LINE__ << std::endl; \
         std::cerr << "\033[0m";                                                        \
-        assert(false);                                                                 \
+        /* Fatal diagnostics must not fall through in NDEBUG builds. */                \
+        std::abort();                                                                  \
     } while (0)
 #endif  // ERROR
 
@@ -33,7 +35,8 @@
         std::cerr << "\033[0;33;1m";                                                   \
         std::cerr << "File: \033[4;37;1m" << __FILE__ << ":" << __LINE__ << std::endl; \
         std::cerr << "\033[0m";                                                        \
-        assert(false);                                                                 \
+        /* Unimplemented operations remain fatal in every build configuration. */       \
+        std::abort();                                                                  \
     } while (0)
 #endif  // TODO
 

@@ -25,6 +25,27 @@ add_test(NAME build-user-journey
 )
 set_tests_properties(backend-registration build-user-journey PROPERTIES TIMEOUT 30)
 
+# Keep the supplied Lab1 expected outputs immutable and compare all columns.
+foreach(fixture IN ITEMS simple witharray withfloat)
+    add_test(NAME lexer-fixture-${fixture}
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/lexer_test.py"
+            --compiler "$<TARGET_FILE:compiler>" --work-dir "${CMAKE_CURRENT_BINARY_DIR}"
+            --fixture "${fixture}")
+    set_tests_properties(lexer-fixture-${fixture} PROPERTIES TIMEOUT 15)
+endforeach()
+add_test(NAME lexer-boundaries
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/lexer_test.py"
+        --compiler "$<TARGET_FILE:compiler>" --work-dir "${CMAKE_CURRENT_BINARY_DIR}"
+        --boundaries)
+set_tests_properties(lexer-boundaries PROPERTIES TIMEOUT 45)
+
+add_executable(lexer_state_smoke lexer_state_smoke.cpp)
+target_link_libraries(lexer_state_smoke PRIVATE sysy_options sysy_interfaces sysy_utils
+    sysy_frontend sysy_middleend sysy_backend)
+add_dependencies(lexer_state_smoke sysy_parser_generated)
+add_test(NAME lexer-state COMMAND lexer_state_smoke)
+set_tests_properties(lexer-state PROPERTIES TIMEOUT 10)
+
 # Host-only developers need no cross tools; a complete WSL environment gets E2E checks.
 find_program(SYSY_TEST_CLANG NAMES clang)
 find_program(SYSY_TEST_LLVM_AS NAMES llvm-as)

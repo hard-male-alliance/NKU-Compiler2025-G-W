@@ -183,7 +183,7 @@ int main(int argc, char** argv)
                 *outStream << setw(INT_PW) << token.line_number << setw(INT_PW) << token.column_number << endl;
             }
 
-            ret = 0;
+            ret = parser.hasLexicalErrors() ? 1 : 0;
             goto cleanup_files;
         }
 

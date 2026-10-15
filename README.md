@@ -136,6 +136,22 @@ python3 test.py --group [Basic|Advanced] --stage [llvm|riscv|arm] --opt [0|1|2]
 
 ## Lab1. 词法分析
 
+当前已补全 SysY2022 的核心词法规则，并保留框架原有的扩展关键字及 `LL_CONST`
+输出约定。三个现有 `.lexer` 预期文件保持不变，已接入 CTest 逐项比较。
+
+```bash
+make
+# 三个现有样例、词法边界测试和扫描器状态/浮点精度测试。
+ctest --preset default -R lexer --output-on-failure
+# 单独查看 Token 表；词法错误会输出诊断并返回非零退出码。
+./bin/compiler -lexer -o .cache/tokens.txt testcase/lexer/withfloat.sy
+```
+
+支持十进制/八进制/十六进制整数、十进制/十六进制单精度浮点数、注释、
+关键字、运算符和带转义的运行库字符串；负号独立分词。Tab 按四列对齐，
+输出行号从 1 开始、列号从 0 开始。实现约定及验证记录见 `doc/lexer-lab1.txt`。
+本阶段不补全 Lab2 文法或后续语义检查。
+
 需要阅读的代码：
 
 - main.cpp : 主函数，你需要了解框架的整体流程以及全局变量, 后续每次实验都需要进行阅读或者编写

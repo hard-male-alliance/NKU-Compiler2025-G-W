@@ -14,6 +14,8 @@ namespace FE
       private:
         Scanner    _scanner;
         YaccParser _parser;
+        /// Lexical diagnostics are separate from unfinished grammar/semantic checks.
+        size_t lexicalErrorCount_ = 0;
 
       public:
         AST::Root* ast;
@@ -26,7 +28,10 @@ namespace FE
         }
         ~Parser() {}
 
+        /// Record a lexical failure and print its span through Bison's diagnostic hook.
         void reportError(const location& loc, const std::string& message);
+        /// Whether scanning encountered an error; callers must not report success.
+        bool hasLexicalErrors() const { return lexicalErrorCount_ != 0; }
 
       private:
         std::vector<Token> parseTokens_impl();

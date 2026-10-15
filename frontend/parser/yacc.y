@@ -70,6 +70,13 @@
 %token SEMICOLON COMMA LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE
 %token END
 
+// Lab1 token payloads preserve the framework's printed token names and values.
+%token INT FLOAT VOID
+%token <long long> LL_CONST
+%token <float> FLOAT_CONST
+%token PLUS MINUS STAR SLASH MOD ASSIGN
+%token LT GT LE GE EQ NE NOT AND OR
+
 %nterm <FE::AST::Operator> UNARY_OP
 %nterm <FE::AST::Type*> TYPE
 %nterm <FE::AST::InitDecl*> INITIALIZER

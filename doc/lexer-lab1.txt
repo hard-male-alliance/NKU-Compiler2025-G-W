@@ -1,0 +1,145 @@
+Lab1: SysY2022 lexical analysis -- 2026-10-15
+===========================================
+
+Scope and normative sources
+---------------------------
+Implement the lexical stage, not the incomplete Lab2 grammar or later passes.
+The primary local source is doc/SysY2022语言定义-V1.pdf, especially the terminal
+definitions for identifiers, comments and constants. It references WG14 N1124
+sections 6.4.2, 6.4.4.1, 6.4.4.2 and 6.4.9. Numeric suffixes are omitted from
+the SysY grammar. The existing testcase/lexer/*.lexer files are immutable
+compatibility contracts for printed names, attributes and source positions.
+
+Core rules
+----------
+Identifiers use ASCII letters/underscore followed by letters/digits/underscore.
+Core keywords: const, int, float, void, if, else, while, break, continue, return.
+Arithmetic, assignment, comparison, logical operators and delimiters are all
+recognized. Flex's longest-match rule handles multi-character operators and
+prevents keyword prefixes from splitting an identifier. Unary signs remain
+separate tokens; exponent signs belong to their floating token.
+
+Integers support decimal, octal (including zero), and 0x/0X hexadecimal forms.
+Floats support decimal fractional/exponent forms and hexadecimal significands
+with mandatory p/P exponents. Leading-dot/trailing-dot forms are supported.
+There is no numeric suffix or source-level long-long type in this implementation.
+Malformed numeric candidates are errors rather than plausible token prefixes.
+Base-specific malformed exponent rules avoid treating 0x1e+2 as a decimal
+exponent: in this non-preprocessing SysY lexer it is integer 30, plus, integer 2.
+
+Line comments end before CR/LF. Block comments end at the first */ and do not
+nest. Exclusive Flex state isolates comment bodies from code/string rules.
+Quoted runtime strings validate simple, octal and hexadecimal C escapes while
+retaining their original escaped payload. Physical newlines, raw NUL bytes,
+unknown escapes and missing closing quotes are diagnosed. This is not a C
+preprocessor: source line-splicing and preprocessing directives are not added.
+
+Representation and compatibility decisions
+-----------------------------------------
+Scanner owns its own Bison location cursor and open-comment location. No
+mutable file-global location is shared between parser instances. CLI line
+numbers stay one-based and columns zero-based; ordinary source columns count
+bytes as before. CRLF is one newline, and lone CR/LF are also accepted.
+Tabs advance to four-column stops, including in comments.
+
+std::from_chars converts numeric spellings without locale dependence or
+unchecked arithmetic. Decimal and hexadecimal floats are converted directly
+to binary32, avoiding intermediate-double rounding. Hex conversion removes
+0x explicitly because from_chars(hex) does not consume that prefix. Supported
+payload widths are asserted at compile time. Representable subnormals are
+accepted; overflow and nonzero values too small to represent are diagnosed.
+
+The provided simple.lexer expects 2147483648 to be LL_CONST. Keep that wide
+token transport (through signed 64-bit maximum) so a later unary minus can
+form -2147483648. This does not introduce a 64-bit SysY type or silently narrow
+larger literals to int. Final source-type range checks belong to semantic
+analysis, which remains a separate lab.
+
+Keep the framework's already-recognized for/switch/case/goto/do keyword tokens
+as compatibility extensions. They are not advertised as SysY2022 core syntax;
+their grammar and semantics are not expanded in Lab1.
+
+STR_CONST.lexeme keeps both quotes and escape spelling; its semantic string
+payload omits only the outer quotes. Escape decoding for runtime IR emission
+is deliberately not performed here, preventing double decoding later.
+
+Error handling
+--------------
+Disable Flex's default ECHO action. Unknown bytes and malformed/unterminated
+tokens emit ERR_TOKEN and a source-located diagnostic. Scanning can continue
+to produce further tokens, but the -lexer CLI exits with status 1 if any lexical
+error occurred. Unterminated block comments are located at their opening /*,
+and the scanner returns to its initial state before the next EOF token.
+Parser's lexical error flag is separate from grammar/semantic failures.
+
+Implementation locations
+------------------------
+frontend/parser/lexer.l: rules, checked conversions and string validation.
+frontend/parser/scanner.h: per-instance locations and scanner helper contracts.
+frontend/parser/yacc.y: additional typed tokens, no completed Lab2 productions.
+frontend/parser/parser.{h,cpp}: typed payload transport and error tracking.
+main.cpp: lexical failure exit status, preserving the existing token table.
+tests/lexer_test.py: golden CLI comparison and independent boundary checks.
+tests/lexer_state_smoke.cpp: scanner independence and exact float rounding.
+
+Validation
+----------
+Existing goldens (all token names, lexemes, values, lines and columns):
+  simple:    130 tokens
+  witharray: 199 tokens
+  withfloat: 210 tokens
+Only line-ending and trailing padding differences are normalized; the golden
+files themselves are not modified. All 539 expected tokens match.
+
+Boundary coverage includes all operator classes, keyword/identifier borders,
+integer bases and ranges, decimal/hex float forms, minimum subnormal and maximum
+finite binary32, zero with large exponents, comment endings, strings, tabs and
+line endings, and 33 invalid-input cases. Twenty deterministic randomized
+metamorphic comparisons (seed 2022, 40 spellings each) insert safe whitespace
+and comments while requiring token names/spellings/values to remain unchanged.
+The API test checks independent parser locations/error state and the decimal
+0.5000000298023224, which lies just above a binary32 rounding midpoint.
+
+Reproduction in WSL from the repository root:
+  make test JOBS=4
+  ctest --preset default -R lexer --output-on-failure
+Other supported presets: clang, debug, cpp20, cpp17. Each complete CTest run
+includes the five Lab1 tests plus the previous three build/toolchain tests.
+Local build/test logs are under .cache/lab1, not committed build products.
+
+Validated configurations: GCC 13 C++23 RelWithDebInfo, Clang 18 C++23
+RelWithDebInfo, GCC 13 C++23 Debug, and GCC 13 C++20/C++17 fallbacks.
+Each passed all eight current CTest checks; the legacy make test entry point
+also passed. The sanitizer configuration passed all five Lab1 checks.
+
+A separate corpus sweep invoked the real -lexer CLI on every existing .sy
+file, writing its token table to /dev/null and requiring exit zero, empty
+stderr and a 30-second per-file timeout. All 235 files passed: functional 200,
+optimization 11, semantic-negative 18, parser 3 and lexer 3. This demonstrates
+lexical coverage of the existing source corpus, not parsing, semantic validity
+or execution correctness. In particular, semantic-negative programs are
+expected to tokenize successfully and fail only at a later stage.
+
+An additional Clang Debug build uses AddressSanitizer and UndefinedBehaviorSanitizer:
+  cmake -S . -B .cache/build/lexer-sanitize -G Ninja \
+    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Debug \
+    '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer'
+  cmake --build .cache/build/lexer-sanitize --parallel 4 --target compiler lexer_state_smoke
+  ctest --test-dir .cache/build/lexer-sanitize -R lexer --output-on-failure
+
+External context
+----------------
+Flex exclusive-state semantics are documented at:
+https://westes.github.io/flex/manual/Start-Conditions.html
+The rules here are independently written for this repository; no external
+compiler implementation was copied. Numeric syntax follows the normative
+reference rather than a hand-written decimal/hex conversion algorithm:
+https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1124.pdf
+
+Tests combine small regression examples with feature-combination checks. This
+is consistent with LLVM's production testing guidance and the broader lesson
+from Csmith that combinations expose failures absent from fixed examples.
+Our whitespace/comment invariance checks are lexer-specific metamorphic tests,
+not Csmith integration or a claim of exhaustive correctness:
+https://llvm.org/docs/TestingGuide.html
+https://users.cs.utah.edu/~regehr/papers/pldi11-preprint.pdf

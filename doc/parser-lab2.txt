@@ -1,0 +1,121 @@
+Lab2: SysY syntax and AST construction -- 2026-11-08
+==================================================
+
+Implementation
+--------------
+frontend/parser/yacc.y now constructs the existing AST classes for declarations,
+integer/long-long/float literals, unary/binary expressions, function calls,
+arrays and nested initializers, blocks, if/else, while, break/continue, return,
+and the framework's for/assignment/comma-expression extensions. No external
+compiler source was copied. The syntax reference is the repository's
+SysY2022 language definition PDF, section 2.
+
+Binary precedence is represented directly by nonterminal layers. Arithmetic,
+comparison and logical operators associate left; assignment associates right.
+Function argument lists and initializer lists use non-comma expressions so
+separators cannot become comma operators. Parenthesized comma expressions
+remain available. THEN/ELSE precedence binds else to the nearest unmatched if.
+Bison reports no conflicts; %expect 0 records that invariant.
+
+Top-level items are declarations or function definitions. Blocks contain
+statements and declarations, not nested function definitions. Every braced
+block retains a BlockStmt, including empty and single-item blocks: dropping
+such nodes would lose lexical scopes before Lab3. Empty statements are null
+nodes, as in the supplied framework. Empty for clauses are also null.
+
+Compatibility choices
+---------------------
+The three supplied .parser files are unchanged. Literal array dimensions keep
+the existing signature spelling, including the sized first parameter dimension
+used by witharray.sy. A nonliteral parameter dimension is printed as [expr] in
+the signature, and its ParamDeclarator subtree prints the actual expression.
+This removes the old unchecked cast from ExprNode to LiteralExpr without
+performing constant evaluation in the parser.
+
+The framework's broader expression grammar remains supported: comparisons and
+logical operators can appear outside conditions; assignment and comma are
+expressions; for clauses may be absent. The existing shared TYPE production
+is retained; semantic type validity, constness, name lookup, array sizes and
+loop-context checks belong to Lab3. The existing numeric AST has no string
+expression node; STR_CONST remains a lexer token, not a new Lab2 AST variant.
+
+The existing starttime()/stoptime() lowering to _sysy_starttime(line) and
+_sysy_stoptime(line) is preserved. LL_CONST retains its long-long payload,
+including the positive operand in -2147483648. Unary locations now refer to
+the operator rather than its operand.
+
+Ownership and failure behavior
+------------------------------
+Parser semantic values own AST nodes with unique_ptr. ParserList<T> also owns
+all elements of a temporary pointer vector. Reductions move ownership or
+release a child/list into an existing AST constructor. Completed AST nodes
+then own their children under the framework's existing destructors; interned
+Entry and Type pointers remain shared and are never parser-owned.
+
+This permits stack unwinding on truncated input without custom cleanup in
+each rule. The root is published only after the explicit scanner END token.
+parseAST_impl checks both Bison's result and lexical errors, deleting any root
+on failure. A valid prefix followed by malformed input never produces a
+successful partial AST. The CLI's existing failure path returns nonzero and
+leaves its AST output empty.
+
+Verification
+------------
+The host lacked Flex/Bison, so verification used an Ubuntu 24.04 Docker image
+named nku-compiler:lab2, installing build-essential, cmake, ninja-build, bison,
+flex, python3, clang and valgrind. GCC 13.3, Bison 3.8.2, Flex 2.6.4 and CMake
+3.28.3 built the default C++23 RelWithDebInfo configuration with -Werror.
+All repository writes used the bind-mounted checkout; containers used --rm.
+
+From the repository root, with its path mounted at /workspace:
+  docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/workspace" \
+    nku-compiler:lab2 cmake --preset default
+  docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/workspace" \
+    nku-compiler:lab2 cmake --build --preset default --target legacy-compiler lexer_state_smoke
+  docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/workspace" \
+    nku-compiler:lab2 ctest --preset default -R '^(parser-|lexer-)' --output-on-failure
+
+The final incremental run passed all nine parser/lexer checks in 1.83 seconds.
+The four Lab2 CLI checks cover:
+- Exact AST comparison against simple, witharray and withfloat, ignoring only
+  trailing line whitespace, as in Lab1's fixture comparison.
+- All binary precedence layers, left/right associativity, comma flattening,
+  separation of call arguments from comma expressions, and large/float literals.
+- Fifty independently generated expression trees (fixed seed 2025, depth 1-4)
+  rendered as source and compared structurally with the printed AST. Each tree
+  is also parsed after whitespace/comment insertion, giving 100 generated runs.
+- Multidimensional parameters and initialization, lexical block preservation,
+  nearest-if else binding, empty for clauses, and runtime timing line arguments.
+- Fifteen malformed inputs, including truncation after a valid function,
+  requiring a failing exit status, diagnostic and empty AST output. Paths with
+  spaces are exercised throughout.
+
+A first grammar-coverage sweep invoked the actual -parser CLI on all 200
+functional, 11 optimization and 18 semantic-negative sources: 229 accepted,
+zero diagnostics, 4.231 seconds total in this environment, a 30-second per-file
+limit. Semantic-negative inputs are syntactically valid and should fail only
+at the later semantic stage. This checks parsing/printing, not program execution.
+
+Valgrind checked simple.sy plus eight constructed valid/truncated programs
+covering parameter lists, dimensions, nested initializers, argument lists,
+expressions and control-flow stacks. All finished with zero memory errors and
+zero heap blocks live at exit. Incremental checks rerun the Lab1 tests because
+the scanner shares Bison's regenerated header, not the unrelated backend suite.
+Temporary logs and experiment inputs are under .temp/lab2; they are not needed
+to preserve these results. The reproducible CLI structural tests are in
+tests/parser_test.py and registered in tests/CMakeLists.txt.
+
+External technical context
+--------------------------
+GNU Bison documents variant-based C++ semantic values and their interaction
+with C++ object lifetime:
+https://www.gnu.org/software/bison/manual/html_node/C_002b_002b-Variants.html
+https://www.gnu.org/software/bison/manual/html_node/Shift_002fReduce.html
+
+The testing design reuses the production/research context recorded in
+lexer-lab1.txt: LLVM's recommendation to isolate feature regressions, and
+Csmith's use of generated combinations to expose compiler defects. These
+Lab2 tests generate syntax trees with an independent structural oracle; they
+do not run Csmith or claim exhaustive language coverage.
+https://llvm.org/docs/TestingGuide.html
+https://users.cs.utah.edu/~regehr/papers/pldi11-preprint.pdf

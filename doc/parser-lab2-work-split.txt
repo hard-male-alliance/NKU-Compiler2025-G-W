@@ -1,0 +1,318 @@
+Lab2: two-person work allocation and commit sequence -- 2026-11-09
+================================================================
+
+1. Scope and reference snapshot
+------------------------------
+This document allocates Lab2 work packages between two roles and defines an
+ordered, reviewable commit series. The user subsequently authorized execution
+of the series and creation of a pull request; execution results are recorded
+at the end of this document.
+
+Repository: hard-male-alliance/NKU-Compiler2025-G-W
+Base HEAD: 87372fa4c61898ac76b8e897dcb6bf8073a8f4ba
+
+Line ranges below refer to the current completed working-tree files, not the
+base revision. Named grammar productions, functions and section headings are
+the durable patch anchors when earlier commits change line numbers. Paths
+below are relative to the repository root.
+
+The implementation and existing verification are described in
+doc/parser-lab2.txt. This document specifies allocation and integration,
+not a new implementation or retrospective individual authorship record.
+Use the actual contributors' identities for any eventual commit attribution.
+
+2. People and ownership
+----------------------
+Person A -- expression grammar, ownership model, parser integration
+  Owns parser semantic types, expression productions and array indexing;
+  coordinates the complete grammar commit; implements expression properties.
+  Reviews B's declaration/control-flow rules and test harness.
+
+Person B -- declaration/control-flow grammar, AST printing, CLI integration
+  Owns statement/declaration productions and parameter construction;
+  fixes parameter printing; implements fixture and statement/error tests;
+  maintains user-facing instructions and the verification record.
+  Reviews A's ownership transfers, expression precedence and final integration.
+
+Both people have substantive grammar work. Neither is assigned only testing
+or documentation. Work-package ownership is finer than commit ownership:
+a commit integrator assembles the indicated contributions without claiming
+that the other person's work was independently authored by the integrator.
+
+3. Shared contracts agreed before editing
+----------------------------------------
+- Every owning node semantic value is unique_ptr<NodeType>.
+- ParserList<T> owns a vector and its elements until an AST constructor takes
+  the whole list. Moves transfer semantic values; release() transfers a child
+  into the existing raw-pointer AST constructors. Entry* and Type* are shared.
+- TYPE -> INT | FLOAT | VOID remains shared across the existing framework.
+- NOCOMMA_EXPR separates commas in argument/initializer/declaration lists;
+  EXPR retains the framework's comma-expression extension.
+- ARRAY_DIMENSION_EXPR_LIST is nonempty. A plain name has a null indices list;
+  an unsized first parameter dimension is a LiteralExpr(-1).
+- B's statements consume A's EXPR and LEFT_VAL_EXPR. A's expression rules
+  do not construct statements or change statement/declaration productions.
+- Every braced block is a BlockStmt, even when empty or single-item.
+- PROGRAM publishes the root only after END. Syntax/lexical failure must
+  return a nonzero CLI exit code and no partial AST.
+- Preserve existing token names, runtime timing-call lowering, sized first
+  parameter dimensions in the supplied fixture, and all three AST goldens.
+
+Only A edits the semantic declaration block. B supplies production bodies
+using the agreed semantic types. Only B edits printer and CMake registration.
+For shared test-file integration, B owns the harness and main(); A supplies
+expression helper/property functions. This avoids simultaneous edits to the
+same lines without splitting the grammar into artificial source modules.
+
+4. File-internal work packages
+-----------------------------
+
+frontend/parser/yacc.y
+  A1. L9: add %expect 0; do not change the scanner's token contract.
+  A2. L14-36: replace the unused sstream include with utility/vector;
+      introduce ParserListDeleter<T> and ParserList<T>.
+  A3. %code top, before %lex-param: remove the unused extern errCnt declaration.
+  A4. L92-108: integrate all %nterm declarations, move-only owning types,
+      new list/item/optional symbols, removal of obsolete FUNC_BODY and the
+      typed PROGRAM value; retain THEN/ELSE precedence declarations.
+  A5. L264-294, ASSIGN_EXPR / EXPR_LIST / EXPR / NOCOMMA_EXPR:
+      construct right-associative assignment, preserve argument separators,
+      flatten comma expressions in source order, and move ownership.
+  A6. L296-335, LOGICAL_OR_EXPR through UNARY_EXPR:
+      implement six binary precedence layers with left recursion; build unary
+      operators at the operator's location, rather than the operand's location.
+  A7. L338-365, BASIC_EXPR / FUNC_CALL_EXPR:
+      move literal/lvalue/call/parenthesized values; retain starttime/stoptime
+      name rewriting and source-line arguments; transfer call-argument lists.
+  A8. L368-400, ARRAY_DIMENSION_EXPR / ARRAY_DIMENSION_EXPR_LIST /
+      LEFT_VAL_EXPR / LITERAL_EXPR / TYPE / UNARY_OP:
+      implement ordered dimensions and indexing, preserve LL_CONST and float
+      payloads, and map the three types and three unary operators.
+
+  B1. L112-135, PROGRAM / TOP_LEVEL_LIST / TOP_LEVEL_ITEM / STMT_LIST /
+      BLOCK_ITEM: distinguish compilation-unit items from block items, accept
+      empty block lists, and publish a complete root only after END.
+  B2. L137-167, STMT / BLOCK_STMT / CONTINUE_STMT / BREAK_STMT / RETURN_STMT /
+      EXPR_STMT: wire all statements, preserve blocks and optional return values.
+      Remove the old singleton/empty FUNC_BODY collapsing rules.
+  B3. L169-182, VAR_DECLARATION / VAR_DECL_STMT / FUNC_DECL_STMT:
+      build declarations with their const flag and source location; construct
+      function definitions with the parameter list and BlockStmt body.
+  B4. L184-211, FOR_INIT / OPTIONAL_EXPR / FOR_STMT / IF_STMT / WHILE_STMT:
+      support absent for clauses, declaration/expression initializers, nearest-if
+      else binding via %prec THEN, and while bodies.
+  B5. L214-241, PARAM_DECLARATOR / PARAM_DECLARATOR_LIST / PARAM_DECLARATORS:
+      construct scalar, unsized-first and sized multidimensional parameters;
+      allow empty and multi-parameter lists without allowing stray commas.
+  B6. L243-262, VAR_DECLARATOR / VAR_DECLARATOR_LIST / INITIALIZER /
+      INITIALIZER_LIST: build optional initializers, ordered declarator lists,
+      empty brace initialization and recursively nested initializer lists.
+
+  Unchanged: token declarations, scanner parameters and error() diagnostic
+  spelling. A and B both apply moves/releases inside their own productions;
+  do not make a later sweeping raw-pointer-to-unique_ptr conversion commit.
+
+frontend/parser/parser.cpp
+  A9. L64-73, Parser::parseAST_impl(): check parse() and hasLexicalErrors();
+      delete/reset any root on failure and return ast. Leave parseTokens_impl()
+      and lexical-error accounting unchanged.
+
+frontend/ast/visitor/printer/stmt_printer.cpp
+  B7. L34-45, inside ASTPrinter::visit(FuncDeclStmt&) parameter dimensions:
+      test isLiteralExpr() before the cast, print [expr] for symbolic dimensions,
+      and use getLL() for numeric dimensions without narrowing to int.
+  B8. L58-68, between signature emission and body emission:
+      print a ParamDeclarator subtree only for parameters containing symbolic
+      dimensions. Literal-only fixture signatures and body formatting stay intact.
+  Do not include changes to the other statement printer visitors.
+
+tests/parser_test.py (new file)
+  B9. L1-68: imports, Tree, require(), run_parser(), valid(), tree(), fixture().
+      Exercise the real CLI with paths containing spaces; capture diagnostics
+      separately; compare unchanged golden files ignoring trailing whitespace.
+  A10. L71-116: expression(), binary(), literal(), generated(),
+       expression_properties(). Cover precedence, associativity, assignment,
+       comma/call separation and 50 fixed-seed expression/trivia pairs.
+  B10. L119-161: statement_properties(). Check initializer nesting and dimension
+       order, parameter-expression printing, block scopes, nearest-if else,
+       empty for clauses, timing-call line numbers and numeric payloads.
+  B11. L164-173: rejection_properties(). Check the 15 malformed/truncated inputs
+       for nonzero status, diagnostics and empty output, including a valid
+       function followed by a broken declaration.
+  B12. L176-195: main() and the entry point. Integrate A10 plus B10/B11 in C4;
+       the smaller fixture-only main() for C3 is defined in section 5 below.
+  All functions have complete Python type annotations.
+
+tests/CMakeLists.txt
+  B13. L49-55: register parser-fixture-simple / witharray / withfloat with
+       15-second timeouts. This belongs to C3.
+  B14. L56-59: register parser-properties with its 45-second timeout.
+       This belongs to C4, not C3.
+  Do not edit the existing lexer, runtime, backend or toolchain tests.
+
+README.md
+  B15. The paragraph under "测试范围说明": replace the obsolete statement about
+       placeholder grammar/Bison conflicts with the current Lab2 status.
+  B16. The end of the Lab1 implementation summary: remove the outdated claim
+       that Lab2 grammar is still unimplemented, retaining the semantic scope.
+  B17. Immediately after "## Lab2. 语法分析": add the implementation summary,
+       make/CTest/CLI commands, .temp creation, immutable-golden statement,
+       structural coverage and the implementation-note link.
+
+doc/parser-lab2.txt (new file)
+  B18. Entire file: implementation, compatibility choices, ownership/failure
+       behavior, reproducible environment, actual verification and references.
+  A reviews ownership/precedence descriptions and measurement interpretations.
+
+doc/parser-lab2-work-split.txt (this file)
+  B19. Entire file: preserve the agreed allocation, integration order and exact
+       staging boundaries. Both people review it before executing the series.
+
+5. Ordered commit series
+------------------------
+
+  Order   Integrator   Commit subject
+  C1      B            fix(ast): print symbolic parameter dimensions safely
+  C2      A            feat(parser): complete SysY grammar with owned AST values
+  C3      B            test(parser): compare the supplied AST fixtures
+  C4      A            test(parser): cover structural and rejection properties
+  C5      B            docs(parser): document Lab2 behavior and collaboration
+
+Dependency chain: base -> C1 -> C2 -> C3 -> C4 -> C5.
+
+C1 -- prerequisite printer correction
+  Include: B7+B8; exactly the two hunks in stmt_printer.cpp.
+  Exclude: every yacc/parser/test/document change.
+  Check: build the compiler. Review that literal-only dimension formatting is
+  unchanged and symbolic dimensions no longer undergo an invalid static cast.
+  Once C2 is integrated, execute a real symbolic-dimension parser journey.
+
+C2 -- one complete grammar integration
+  Include: A1-A9 and B1-B6; all current changes to yacc.y and parser.cpp.
+  Exclude: tests, README and documentation.
+  A integrates B's agreed production bodies and B reviews the complete result.
+  The grammar remains one commit because semantic types and their consumers
+  must change together. A declaration-only unique_ptr conversion would leave
+  old raw-pointer actions incompatible; expression-only integration would leave
+  the original placeholder rules active. Those are not working checkpoints.
+  Check: build, Bison zero conflicts, three golden CLI comparisons, one
+  symbolic multidimensional parameter example and malformed trailing input.
+  The uncommitted final test script may be used to run these checks, but is not
+  staged with C2; report that distinction in the eventual commit body.
+
+C3 -- fixture-only runnable test harness
+  Include: B9, B13 and the following fixture-only main()/entry point in the new
+  parser_test.py. Do not stage the completed file wholesale at this step.
+
+    def main() -> None:
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--compiler", required=True)
+        parser.add_argument("--work-dir", type=Path, required=True)
+        parser.add_argument("--fixture", required=True,
+                            choices=["simple", "witharray", "withfloat"])
+        args = parser.parse_args()
+        args.work_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="parser-", dir=args.work_dir) as directory:
+            fixture(args.compiler, Path(directory), args.fixture)
+
+    if __name__ == "__main__":
+        main()
+
+  Exclude: A10, B10+B11, the final no-fixture dispatch branch and B14.
+  Check: the three registered parser-fixture-* tests pass against unchanged
+  .parser files. This commit's entry point has no reference to absent helpers.
+
+C4 -- property tests and their registration
+  Include: A10+B10+B11, B14; replace the fixture-only main() with B12.
+  The main() delta removes required=True from --fixture; fixture mode stays
+  unchanged, and no-fixture mode invokes the three property suites and prints
+  their summary. Both Python and CMake must land in this same commit.
+  A integrates the property tests; B supplies statement/error cases and reviews
+  CLI dispatch. Existing fixture lines are not reformatted or moved.
+  Check: parser-properties, then the five existing lexer checks because the
+  lexer consumes the regenerated Bison header. Do not rerun unrelated backend
+  suites. Investigate any failure before expanding the validation scope.
+
+C5 -- documentation and recorded results
+  Include: B15-B19; README.md and both new doc/*.txt files, nothing else.
+  Check: commands/names agree with C2-C4; results match the existing record;
+  grammar acceptance is not described as semantic checking/program execution.
+  This is a documentation-only commit, so no compiler rebuild is needed.
+
+All five commits should have a body explaining purpose, decisions, verification
+actually performed and relevant remaining scope. Use real contributor metadata;
+a shared integration commit can credit actual joint work when appropriate.
+The plan does not require manufacturing a separate authored commit for each
+work package. Each numbered work package is a review unit within its commit.
+
+6. Staging the already-completed working tree
+--------------------------------------------
+- Leave the source working tree at the completed version while preparing the
+  sequence. Do not reset/checkout the repository to recreate implementation.
+- C1, C2 and C5 have disjoint file sets and can be staged by explicit paths
+  after reviewing those exact diffs. Never use git add . or git commit -a.
+- C3/C4 split two files internally. Stage only B13 in C3 and B14 in C4.
+  Git may present those adjacent CMake additions as a single hunk: split or
+  edit the staged patch rather than staging the whole hunk.
+- parser_test.py is currently untracked. Stage its fixture-only C3 content
+  through the index, leaving the completed working copy untouched. For example,
+  use a reviewed temporary C3 file under .temp/lab2 and Git's hash-object and
+  update-index --cacheinfo facilities; then inspect git show :tests/parser_test.py.
+  A plain git add tests/parser_test.py would incorrectly put all C4 work in C3.
+- After C3, the working-copy delta naturally contains A10/B10/B11 and the final
+  main() changes; stage that delta together with B14 for C4.
+- Before every eventual commit inspect git diff --cached --stat and
+  git diff --cached. Confirm no future-commit files/functions are included.
+- For an intermediate-commit build, materialize the proposed index tree under
+  .temp/lab2, with its own build directory. A build of the completed working tree
+  alone does not demonstrate that the staged intermediate tree builds.
+  Use a typed Python helper if automating index snapshots or test orchestration.
+- Preserve test fixtures byte-for-byte. Never stage .cache/, .temp/, bin/,
+  generated yacc/lexer files, logs, archives or the temporary Dockerfile.
+- Keep the existing Docker image for reproducibility; verification containers
+  use --rm and the project bind mount. Do not restart unrelated containers.
+
+7. Execution rhythm and final acceptance
+----------------------------------------
+A first publishes the ownership and expression/list contracts in section 3.
+B can prepare C1 and the statement/declaration bodies in parallel with A's
+expression work; there is a single integration point for yacc.y at C2.
+B can also prepare the fixture harness while A reviews the complete grammar.
+After C3, A integrates expression properties and B's statement/error properties
+for C4. B then reconciles the final documentation for C5.
+
+Final user journey:
+  configure/build in the available Docker environment;
+  compile a supplied .sy with -parser -o and inspect its AST;
+  match all three unchanged goldens;
+  pass four parser and five affected lexer checks;
+  check valid-prefix-plus-broken-suffix failure and symbolic array parameters;
+  retain the already-recorded 229-source grammar sweep and memory results
+  without repeating them merely to populate every commit body.
+
+After the series, the implementation tree must match today's completed Lab2
+working tree, with this planning document added and its execution record
+updated. Existing Lab1 interfaces and output fixtures remain unchanged.
+
+8. Execution record -- 2026-11-09
+--------------------------------
+The user authorized committing this document with the implementation and opening
+a PR. The series was prepared on codex/lab2-parser against origin/main at the
+base recorded above. A/B remain the work-allocation roles; the Git commits use
+the authenticated user's identity, not invented identities for these roles.
+
+  C1  27034f7  Printer correction; exact index snapshot builds successfully.
+  C2  6f6abb7  Complete grammar; exact index snapshot builds with zero conflicts.
+               Three goldens, statement/symbolic-dimension checks and all 15
+               malformed cases pass using the not-yet-committed final driver.
+  C3  0063d41  Fixture-only index content; 3/3 registered cases pass in 0.33 s.
+  C4  28440b5  Property suite plus affected lexer checks; 6/6 pass in 1.46 s.
+  C5           This documentation update, implementation record and README.
+
+Each proposed index tree was exported under .temp/lab2/commit-check. C3 staged
+only the fixture-mode script and fixture registrations; C4 staged the remaining
+property functions, dispatch changes and registration. The completed working
+copies were not reverted. Review and git diff --cached --check preceded commits.
+Build/test logs and the typed orchestration helpers remain under .temp/lab2;
+none are included in the commit series. The production sources and final test
+script match the previously completed Lab2 implementation.

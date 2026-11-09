@@ -63,7 +63,11 @@ namespace FE
 
     AST::Root* Parser::parseAST_impl()
     {
-        _parser.parse();
+        if (_parser.parse() != 0 || hasLexicalErrors())
+        {
+            delete ast;
+            ast = nullptr;
+        }
         return ast;
     }
 }  // namespace FE

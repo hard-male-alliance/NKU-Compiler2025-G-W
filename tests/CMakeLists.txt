@@ -53,6 +53,10 @@ foreach(fixture IN ITEMS simple witharray withfloat)
             --fixture "${fixture}")
     set_tests_properties(parser-fixture-${fixture} PROPERTIES TIMEOUT 15)
 endforeach()
+add_test(NAME parser-properties
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/parser_test.py"
+        --compiler "$<TARGET_FILE:compiler>" --work-dir "${CMAKE_CURRENT_BINARY_DIR}")
+set_tests_properties(parser-properties PROPERTIES TIMEOUT 45)
 
 # Host-only developers need no cross tools; a complete WSL environment gets E2E checks.
 find_program(SYSY_TEST_CLANG NAMES clang)

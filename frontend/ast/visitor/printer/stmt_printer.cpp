@@ -32,9 +32,13 @@ namespace FE::AST
                     for (size_t j = 0; j < p->dims->size(); ++j)
                     {
                         ExprNode* dimExpr = (*p->dims)[j];
-                        auto*     lit     = static_cast<LiteralExpr*>(dimExpr);
-
-                        int v = lit->literal.getInt();
+                        if (!dimExpr->isLiteralExpr())
+                        {
+                            paramStr += "[expr]";
+                            continue;
+                        }
+                        auto*     lit = static_cast<LiteralExpr*>(dimExpr);
+                        long long v = lit->literal.getLL();
                         if (v < 0)
                             paramStr += "[]";
                         else
@@ -51,6 +55,17 @@ namespace FE::AST
         sig += std::to_string(node.line_num);
         emitHeader(*os, sig);
 
+        // Keep literal-only signatures unchanged; expose symbolic dimensions as ASTs.
+        if (node.params)
+        {
+            for (auto* param : *node.params)
+            {
+                if (!param->dims) continue;
+                bool symbolic = false;
+                for (auto* dim : *param->dims) symbolic |= !dim->isLiteralExpr();
+                if (symbolic) withChild(node.body == nullptr, [&]() { apply(*this, *param, os); });
+            }
+        }
         if (node.body) withChild(true, [&]() { apply(*this, *node.body, os); });
     }
 

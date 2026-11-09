@@ -46,6 +46,14 @@ add_dependencies(lexer_state_smoke sysy_parser_generated)
 add_test(NAME lexer-state COMMAND lexer_state_smoke)
 set_tests_properties(lexer-state PROPERTIES TIMEOUT 10)
 
+foreach(fixture IN ITEMS simple witharray withfloat)
+    add_test(NAME parser-fixture-${fixture}
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/parser_test.py"
+            --compiler "$<TARGET_FILE:compiler>" --work-dir "${CMAKE_CURRENT_BINARY_DIR}"
+            --fixture "${fixture}")
+    set_tests_properties(parser-fixture-${fixture} PROPERTIES TIMEOUT 15)
+endforeach()
+
 # Host-only developers need no cross tools; a complete WSL environment gets E2E checks.
 find_program(SYSY_TEST_CLANG NAMES clang)
 find_program(SYSY_TEST_LLVM_AS NAMES llvm-as)

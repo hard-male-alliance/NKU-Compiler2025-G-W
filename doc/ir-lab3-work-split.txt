@@ -1,0 +1,140 @@
+Lab3: two-person work allocation and commit sequence -- 2026-11-25
+=================================================================
+
+1. Scope and attribution
+------------------------
+Integration base: 3e76734753f7b45966c45e58d2297c1241e864c3 (origin/main).
+
+This is the work split for the implemented semantic-analysis and LLVM IR
+lab, including the tensor extension in both stages. It follows Lab2's
+role-based allocation and uses file/symbol anchors rather than fragile
+line numbers. This records ownership for collaboration and integration;
+it does not claim individual historical authorship or that commits were
+already created. Use actual contributor identities if executing the series.
+
+2. People and ownership
+-----------------------
+Person A -- language semantics and shape contract
+  Owns scanner/parser tensor syntax, AST type metadata, symbol scopes,
+  scalar/array/tensor checking, initializer plans, and result-shape inference.
+  Owns semantic diagnostic cases and reviews whether B's lowering follows
+  the parameter, return, and initializer contracts.
+
+Person B -- LLVM lowering, tensor ABI, and end-to-end integration
+  Owns scalar/array/control-flow lowering, tensor loop kernels and runtime
+  extent checks, instruction/operand changes, and compile/link/run checks.
+  Owns test registration and verification notes, and reviews A's scope
+  behavior, initializer layout, and shape inference.
+
+Both roles own substantive tensor functionality. A supplies negative cases
+inside the shared driver; B owns launcher/execution code and CTest registration.
+
+3. Shared contracts
+-------------------
+- One scalar element Type, a distinct tensor type category, and an ordered
+  shape. A negative first extent denotes an unsized parameter; subsequent
+  extents are positive constants for tensors.
+- A fully indexed tensor is a scalar; a bare tensor supplies an aggregate
+  buffer. Ordinary arrays keep partial indexing and the existing runtime ABI.
+- VarDeclarator.binding and initializers are the only sources of declaration
+  layout for codegen. The plan records explicit elements in source order;
+  omitted elements are zero only when an initializer requires zero fill.
+- ExprNode attributes carry scalar type/constant value and aggregate shape;
+  extentParameter names the actual argument supplying a dynamic first
+  extent. Function return metadata publishes either a fixed shape or that
+  first-extent dependency. B consumes the annotations without recomputing
+  semantic rules.
+- A tensor argument passes pointer plus the first extent. Return storage
+  belongs to the caller. Static shape conflicts fail in semantic analysis;
+  operations with unknown extents compare their runtime lengths before use.
+- Lab1/Lab2 fixture output and the classroom testcase tree and test.py
+  are preserved. New negative cases check diagnostics, not just parser failure.
+
+4. Review units and patch anchors
+---------------------------------
+A1. frontend/parser/{lexer.l,yacc.y}, interfaces/frontend/ast/ast_defs.{h,cpp}
+    Add tensor int/float and @ at multiplicative precedence. Preserve Bison
+    %expect 0 and allow the tensor spelling in existing identifier positions.
+    In the header the VarAttr extentParameter hunk belongs to A2,
+    not this syntax package.
+A2. frontend/symbol/symbol_table.{h,cpp}, frontend/ast/{decl,expr,stmt}.h,
+    VarAttr in ast_defs.h, and sementic_check/{ast_checker,stmt_checker}.*
+    Add the lexical scope stack, declaration/return metadata, built-in
+    signatures, return-shape settlement and loop/function checking.
+A3. sementic_check/{decl_checker,expr_checker,type_infer}.cpp
+    Check extents, flatten initializer subobjects, fold constants, check
+    expressions, calls, tensor shape compatibility and compile-time products.
+A4. tests/lab3_test.py: rejected() and negative(). Own the semantic fixture
+    suite and extension-specific malformed cases.
+
+B1. middleend/visitor/codegen/{ast_codegen,decl_codegen,stmt_codegen,
+    expr_codegen,type_convert}.*, and middleend/module/ir_instruction.cpp
+    Lower global/local storage, array addresses, numeric conversions, calls,
+    short circuit, and loop/branch exits. Handle singleton/zero-padded globals.
+B2. middleend/visitor/codegen/{ast_codegen,tensor_codegen,expr_codegen,
+    stmt_codegen}.*, middleend/CMakeLists.txt, middleend/module/ir_instruction.h
+    and ir_instruction.cpp alloca printing. Connect the tensor ABI, alias-safe
+    copies, loops and matrix products, dynamic scratch lifetimes, and guards.
+    In ir_operand.{h,cpp}, intern float constants by bits so negative zero
+    remains distinct from positive zero and NaN cannot poison map lookup.
+B3. tests/lab3_test.py: run(), executable(), tensor_journey(),
+    incompatible_dynamic_extents(), generated_products(), main().
+    Own the complete LLVM execution path and tests/CMakeLists.txt registration.
+B4. README.md and both Lab3 documents. Reconcile test results and scope
+    with A and record the integration sequence without inventing author data.
+
+5. Ordered commit series
+------------------------
+
+  Order   Integrator   Commit subject
+  C1      A            feat(parser): recognize tensor types and matrix multiplication
+  C2      B            feat(compiler): implement Lab3 semantics and LLVM lowering
+  C3      A            test(lab3): exercise diagnostics and executable tensor programs
+  C4      B            docs(lab3): record implementation and collaboration boundaries
+
+C1 -- tensor syntax
+  Stage A1, excluding the VarAttr extentParameter hunk, and the two existing
+  lexer/parser negative samples that replace @ with an illegal character.
+  Check Bison conflicts, old goldens, and tensor AST construction.
+
+C2 -- complete checked translation
+  Stage A2/A3 plus B1/B2, all front/middleend sources left after C1. The
+  annotation producer and consumer land together: the old accepted-program
+  -llvm path is scaffold code, and a partial semantic-only or tensor-only
+  integration does not provide the new working user journey. Run the
+  classroom groups and the Lab3 driver directly from the completed working
+  tree as pre-staging verification; the CTest hooks are not part of C2.
+
+C3 -- executable verification
+  Stage A4/B3 (the whole new driver and its CMake registrations). Verify the
+  registered semantic and tensor journeys, and the affected lexer/parser
+  checks. Do not stage test_output/, .temp/, or modified expected results.
+
+C4 -- implementation and allocation record
+  Stage B4 only. Verify that the README invocations match the CLI and the
+  recorded results. No implementation or binary changes belong here.
+
+6. Staging and acceptance
+-------------------------
+Use explicit paths, with partial staging only for the A1/A2 header boundary.
+Do not reset the completed working files to reconstruct earlier checkpoints;
+if checking an intermediate index tree, export it under .temp/lab3 and build
+there. Keep user-supplied lab/tensor PDFs, generated lexer/parser output,
+binary artifacts, and temporary test logs out of the patch unless separately
+requested. Review the staged diff before every eventual commit. No commit or
+pull request is implied by the allocation itself.
+
+Final acceptance is the unchanged Basic and Advanced LLVM execution suites,
+all Lab3 semantic negatives, successful real tensor programs and runtime
+extent mismatch coverage, and the unchanged lexer/parser fixture output.
+
+7. Execution record -- 2026-11-25
+--------------------------------
+The series was prepared on codex/lab3-tensor from the remote main tree,
+which already contained the Lab2 changes. A/B are work-allocation roles;
+the commits use the authenticated repository contributor's identity.
+
+  C1  cdcb036  Exact staged snapshot built; 9/9 lexer/parser checks and tensor AST smoke.
+  C2  c7bebc9  Basic and Advanced each passed 100/100 at both -O0 and -O1.
+  C3  063277b  Targeted CTest passed 11/11, including both new Lab3 checks.
+  C4           README, implementation notes, and this execution record.

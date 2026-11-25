@@ -1,0 +1,124 @@
+Lab3: SysY semantic analysis and LLVM IR, including tensors -- 2026-11-25
+=====================================================================
+
+Scope
+-----
+The supplied Lab3 handout (doc/lab.pdf, sections 3--7) and tensor supplement
+(doc/tensor.pdf) define the requirements. The existing SysY2022 PDF defines
+ordinary arrays, scalar conversions, and source-order declaration visibility.
+The public compiler path is -llvm; -lexer and -parser remain independent.
+The parser accepts an existing identifier spelled "tensor" in name positions;
+the lexer classifies that spelling as TENSOR for the extension.
+The default compiler still builds the downstream backend scaffolding, but
+native assembly instruction selection is Lab5 and is not part of this result.
+
+Semantic analysis
+-----------------
+The symbol table owns one map per lexical scope. Exiting a scope invalidates
+lookup entries, not the binding and shape data copied onto the AST. Interned
+names do not identify storage: the nearest scope and declaration do. Function
+parameters have an enclosing scope separate from their block, preserving the
+classroom allowance for a body variable with the same name as a parameter.
+Built-in signatures have one owner in ASTChecker and are used by both
+semantic call checks and IR declaration emission.
+
+Array and tensor initializers are laid out once, into an ordered list of
+(linear offset, initializer expression). A trailing-dimension product gives
+the size of the subobject currently being initialized. Nested lists consume
+only that subobject, while flat expressions consume one scalar each; unfilled
+elements are zero. The same plan drives compile-time globals/const values and
+runtime local writes, including initializer side-effect order. Const tensors
+support element reads and compile-time whole-value arithmetic in initializers.
+SysY global initializers remain constant expressions.
+
+Tensor element type and rank/shape are independent from scalar/array syntax.
+Bare tensors are whole values and indexed tensors require all subscripts.
+Ordinary arrays can decay at a partial index. Numeric scalar contexts preserve
+SysY int/float conversion and bool promotion; tensor arithmetic instead
+requires the exact element type. Relational and logical operators reject
+whole tensors. Matrix multiplication requires rank 2 and equal contraction
+extents, and derives the two outer extents. An unsized parameter has a dynamic
+first extent only; its rank, element type, and remaining extents are static.
+User-defined array and tensor parameters check their respective shapes; the
+unmodified SysY I/O library accepts an ordinary array as a linear buffer,
+including the full multidimensional float arrays in 71_derich1.sy.
+
+IR and lifetime contract
+------------------------
+All aggregate addresses are row-major element pointers; scalar GEPs use
+linear offsets. Local fixed-size storage is allocated in a prologue so
+executing a source loop does not grow the stack. Dynamic expression
+temporaries use stacksave/stackrestore over the full expression. A lazily
+inserted save dominates the entire expression, including short-circuit
+merges; the restore comes after the last consumer.
+
+  Source value                       LLVM lowering
+  ------------                       -------------
+  Scalar                             i32 / float, or i1 for a predicate
+  Ordinary array parameter           ptr (original SysY calling convention)
+  Tensor parameter                   ptr, i32 first extent
+  Tensor result                      void return, leading caller-owned ptr
+  Tensor assignment                  overlap-safe element-buffer copy
+  Tensor arithmetic                  counted loops, scalar operands evaluated once
+  Tensor matrix multiplication (@)  row-major dot products, fixed inner extent
+
+A tensor result shape comes from the function's return expressions, not
+from the lifetime of a returned local. If the result carries an unsized
+parameter extent, calls substitute the selected actual argument's extent:
+the shape can be fixed at the call site, or a dynamic extent can be forwarded.
+The callee copies into the caller's result storage before returning, including
+through recursion. All return arms must agree in their statically known
+dimensions. When an operation requires extent equality but the compiler
+only knows one or both extents dynamically, the generated IR checks equality
+before indexing/copying and traps on mismatch. Tensor element bounds are
+undefined by the handout and are not checked. Element counts and linear
+offsets use the framework's i32 indices; memory-intrinsic lengths are i64.
+
+Scalar operands are carried explicitly instead of inferring a result from
+the highest allocated register. Short-circuit expressions merge i1 values
+with a phi node from the actual predecessor blocks; terminated statements
+do not append a second terminator. For-loop continue goes to the step block,
+and while-loop continue goes to the condition block.
+
+References and design judgment
+------------------------------
+- LLVM Language Reference: https://llvm.org/docs/LangRef.html
+  Opaque-pointer GEP, phi edges, stack allocation/lifetime, and memmove
+  contracts govern the IR. Existing IR objects are used rather than emitting
+  a separate textual dialect; only alloca needed a dynamic element count.
+- MLIR Bufferization: https://mlir.llvm.org/docs/Bufferization/
+  The caller-owned result has the same ownership benefit as destination-
+  passing style without importing MLIR or adding an optimization pipeline.
+  Distinct operator temporaries avoid write/read aliasing; memmove handles
+  potentially aliased function parameters on assignment.
+- "Composable and Modular Code Generation in MLIR" (2022):
+  https://arxiv.org/abs/2202.03293
+  The separation of shape checking from counted-loop lowering maps to the
+  existing frontend/middleend boundary. Tiling/fusion/vectorization are not
+  requirements of the Lab3 LLVM translation and are not claimed here.
+
+Verification
+------------
+Build with the existing default preset, then run both classroom groups with
+the unchanged test.py and the 11 targeted CTest journeys:
+
+  cmake --preset default
+  cmake --build --preset default --target legacy-compiler lexer_state_smoke sysy_runtime
+  ctest --preset default -R '^(lexer-|parser-|lab3-)' --output-on-failure
+  python3 test.py --stage=llvm --group=Basic --opt=0
+  python3 test.py --stage=llvm --group=Advanced --opt=0
+
+Both classroom groups passed 100/100 at -O0 and again at -O1 (400/400
+compile/link/run comparisons) with host Clang and the supplied x86 runtime.
+The 11 targeted CTest journeys passed in the nku-compiler:lab2 image with
+GCC 13, Bison 3.8.2, Flex 2.6.4, and Clang 18.
+
+The lab3-semantics test includes all 18 supplied semantic negatives and
+23 additional diagnostic cases; it requires exit status 1 and empty IR.
+The lab3-tensor-journey compiles, links and executes a mixed tensor program
+with both -O0 and -O1. It covers dynamic shape forwarding, nested function
+calls, recursion, const folding, whole-copy semantics, int/float matmul and
+elementwise operators, short circuit, and stack reuse over source loops.
+It also checks 24 deterministic matrix products against a scalar Python
+reference and exercises a runtime shape mismatch. The existing Lab1/Lab2
+goldens and the official functional fixtures and runner are unchanged.

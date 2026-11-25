@@ -104,7 +104,8 @@ ELF 头和 note 段；原 `0x90000000` 会让该工具链的静态链接产生�
 源码重建运行库的输入输出以及关闭断言时的致命诊断。完整 WSL 环境还会检查三个
 链接辅助脚本和 `test.py` 的宿主/AArch64/RV64 链接、执行、答案比较路径。
 这些环境测试使用已知 IR/汇编输入，不代表各实验已完成；
-Lab2 文法现已补全且无 Bison 冲突；执行功能程序仍需完成后续语义分析和代码生成实验。
+Lab2 保持原有词法和 AST 样例输出；Lab3 已接通 SysY 和 tensor 的 LLVM IR 路径。
+原生目标汇编仍属于后续后端实验。
 
 ### 2.运行你的样例程序
 
@@ -208,29 +209,32 @@ __同样，如果你没有找到lexer/yacc.h/cpp，这是完全正常的，你�
 
 ## Lab3-1. 语义分析
 
-需要阅读的代码：
-
-- interfaces/frontend/symbol/isymbol_table.h ： 定义了符号表的操作接口。
-
-需要阅读并编写的代码：
-
-- frontend/symbol/symbol_table.cpp ：实现符号表的处理函数。
-- frontend/ast/visitor/sementic_check/ : 结合注释，完成语义检查器的功能。
-
-完成代码后，你的编译器应能对semant测试用例中的非法程序进行识别和报错；对于合法程序，以-parser运行编译器，应能打印出标记后的语法树。
+`-llvm` 在生成 IR 前检查作用域、常量、数值运算、函数调用和控制流。
+数组支持常量维度、部分下标退化和嵌套/平铺初始化。
+`tensor int` / `tensor float` 另检查正整数维度、完整下标、形状与元素类型、
+逐元素运算、矩阵乘法及参数/返回值。错误包含源码位置，返回非零状态，不输出部分 IR。
+`-parser` 仍只解析并打印 AST，不执行语义检查。
 
 ## Lab3-2. 中间代码生成
 
-需要阅读的代码：
+支持整数、浮点数、数组、短路求值、函数及循环的 LLVM IR 生成。
+张量支持整体复制、逐元素运算、标量提升、`@`、`[]` 形参和返回值。
 
-- middleend/module/ : 定义了中间代码的操作数、指令、基本块、函数、模块类，你需要理解关键的成员变量和函数实现，这对你构建中间代码至关重要。
-- middleend/visitor/printer/ : 中间代码的打印。另外，middleend/module/ir_instruction.cpp中给出了ir指令的具体打印过程，如果你不理解Lab3-2具体是在做什么，可以先阅读这个文件。
+```bash
+cmake --preset default
+cmake --build --preset default --target legacy-compiler lexer_state_smoke sysy_runtime
+ctest --preset default -R '^(lexer-|parser-|lab3-)' --output-on-failure
 
-需要阅读并编写的代码：
+mkdir -p .temp
+bin/compiler -llvm testcase/parser/simple.sy -o .temp/simple.ll
+clang .temp/simple.ll .cache/build/default/lib/libsysy_x86.a -o .temp/simple
+.temp/simple
 
-- middleend/visitor/codegen/ ： 根据提示完成AST到IR的转换。注意，ast_codegen.h中已经为你提供了生成指令、插入基本块等操作的接口。
+python3 test.py --stage=llvm --group=Basic --opt=0
+python3 test.py --stage=llvm --group=Advanced --opt=0
+```
 
-你可以用-llvm运行编译器进行打印和分析；完成代码后，运行testcase/functional/下的测试用例，根据测试用例的通过情况来对你的实现进行评分。
+详见 [Lab3 实现与验证](doc/ir-lab3.txt) 和 [Lab3 双人分工与提交边界](doc/ir-lab3-work-split.txt)。
 
 ## Lab4. 中间代码优化
 

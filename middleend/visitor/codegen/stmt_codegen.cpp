@@ -2,82 +2,165 @@
 
 namespace ME
 {
-    void ASTCodeGen::visit(FE::AST::ExprStmt& node, Module* m)
+    using namespace FE::AST;
+
+    void ASTCodeGen::visit(ExprStmt& node, Module* module)
     {
         if (!node.expr) return;
-        apply(*this, *node.expr, m);
+        startExpression();
+        eval(*node.expr, module);
+        finishExpression();
     }
 
-    void ASTCodeGen::visit(FE::AST::FuncDeclStmt& node, Module* m)
+    void ASTCodeGen::visit(FuncDeclStmt& node, Module* module)
     {
-        // TODO(Lab 3-2): 生成函数定义 IR（形参、入口/结束基本块、返回补丁）
-        // 设置函数返回类型与参数寄存器，创建基本块骨架，并生成函数体
-        (void)node;
-        (void)m;
-        TODO("Lab3-2: Implement FuncDeclStmt IR generation");
+        const bool tensor = isTensor(node.retType);
+        auto       dt     = tensor ? DataType::VOID : type(node.retType);
+        function          = new Function(new FuncDefInst(dt, node.entry->getName()));
+        module->functions.push_back(function);
+        sourceFunction = &node;
+        trapBlock      = nullptr;
+        entry = block = newBlock();
+        locals.emplace_back();
+        if (tensor)
+        {
+            returnBuffer = {reg(), node.returnShape.front() > 0 ? imm(node.returnShape.front()) : nullptr};
+            function->funcDef->argRegs.emplace_back(DataType::PTR, returnBuffer.data);
+        }
+        if (node.params)
+        {
+            for (auto* param : *node.params) generate(param, module);
+            if (tensor && !returnBuffer.first)
+                returnBuffer.first = lookup((*node.params)[node.returnExtentParameter]->entry).value.first;
+        }
+        auto* body = newBlock();
+        jump(body);
+        block = body;
+        generate(node.body, module);
+        locals.pop_back();
+        if (!terminated())
+        {
+            if (tensor) zeroFill(returnBuffer.data, elements(node.returnShape, returnBuffer.first));
+            auto* zero = dt == DataType::F32 ? static_cast<Operand*>(getImmeF32Operand(0.0f)) : imm(0);
+            emit(new RetInst(dt, dt == DataType::VOID ? nullptr : zero));
+        }
     }
 
-    void ASTCodeGen::visit(FE::AST::VarDeclStmt& node, Module* m)
+    void ASTCodeGen::visit(VarDeclStmt& node, Module* module) { generate(node.decl, module); }
+
+    void ASTCodeGen::visit(BlockStmt& node, Module* module)
     {
-        // TODO(Lab 3-2): 生成变量声明语句 IR（局部变量分配、初始化）
-        (void)node;
-        (void)m;
-        TODO("Lab3-2: Implement VarDeclStmt IR generation");
+        locals.emplace_back();
+        for (auto* stmt : *node.stmts)
+        {
+            if (terminated()) break;
+            generate(stmt, module);
+        }
+        locals.pop_back();
     }
 
-    void ASTCodeGen::visit(FE::AST::BlockStmt& node, Module* m)
+    void ASTCodeGen::visit(ReturnStmt& node, Module* module)
     {
-        // TODO(Lab 3-2): 生成语句块 IR（作用域管理，顺序生成子语句）
-        (void)node;
-        (void)m;
-        TODO("Lab3-2: Implement BlockStmt IR generation");
+        auto* returnType = sourceFunction->retType;
+        if (!node.retExpr)
+        {
+            emit(new RetInst(DataType::VOID));
+            return;
+        }
+        startExpression();
+        if (isTensor(returnType))
+        {
+            copy(returnBuffer, eval(*node.retExpr, module), sourceFunction->returnShape);
+            finishExpression();
+            emit(new RetInst(DataType::VOID));
+            return;
+        }
+        auto  dt    = type(returnType);
+        auto* value = evalScalar(*node.retExpr, dt, module);
+        finishExpression();
+        emit(new RetInst(dt, value));
     }
 
-    void ASTCodeGen::visit(FE::AST::ReturnStmt& node, Module* m)
+    void ASTCodeGen::visit(IfStmt& node, Module* module)
     {
-        // TODO(Lab 3-2): 生成 return 语句 IR（可选返回值与类型转换）
-        (void)node;
-        (void)m;
-        TODO("Lab3-2: Implement ReturnStmt IR generation");
+        startExpression();
+        auto* cond = evalScalar(*node.cond, DataType::I1, module);
+        finishExpression();
+        auto* yes = newBlock();
+        auto* no  = node.elseStmt ? newBlock() : nullptr;
+        auto* end = newBlock();
+        branch(cond, yes, no ? no : end);
+
+        block = yes;
+        generate(node.thenStmt, module);
+        jump(end);
+        if (no)
+        {
+            block = no;
+            generate(node.elseStmt, module);
+            jump(end);
+        }
+        block = end;
     }
 
-    void ASTCodeGen::visit(FE::AST::WhileStmt& node, Module* m)
+    void ASTCodeGen::visit(WhileStmt& node, Module* module)
     {
-        // TODO(Lab 3-2): 生成 while 循环 IR（条件块、循环体与结束块、循环标签）
-        (void)node;
-        (void)m;
-        TODO("Lab3-2: Implement WhileStmt IR generation");
+        auto* test = newBlock();
+        auto* body = newBlock();
+        auto* end  = newBlock();
+        jump(test);
+        block = test;
+        startExpression();
+        auto* cond = evalScalar(*node.cond, DataType::I1, module);
+        finishExpression();
+        branch(cond, body, end);
+
+        block = body;
+        loops.push_back({test, end});
+        generate(node.body, module);
+        loops.pop_back();
+        jump(test);
+        block = end;
     }
 
-    void ASTCodeGen::visit(FE::AST::IfStmt& node, Module* m)
-    {
-        // TODO(Lab 3-2): 生成 if/else IR（then/else/end 基本块与条件分支）
-        (void)node;
-        (void)m;
-        TODO("Lab3-2: Implement IfStmt IR generation");
-    }
+    void ASTCodeGen::visit(BreakStmt&, Module*) { jump(loops.back().end); }
+    void ASTCodeGen::visit(ContinueStmt&, Module*) { jump(loops.back().next); }
 
-    void ASTCodeGen::visit(FE::AST::BreakStmt& node, Module* m)
+    void ASTCodeGen::visit(ForStmt& node, Module* module)
     {
-        // TODO(Lab 3-2): 生成 break 的无条件跳转至循环结束块
-        (void)node;
-        (void)m;
-        TODO("Lab3-2: Implement BreakStmt IR generation");
-    }
+        locals.emplace_back();
+        generate(node.init, module);
+        auto* test = newBlock();
+        auto* body = newBlock();
+        auto* step = newBlock();
+        auto* end  = newBlock();
+        jump(test);
+        block = test;
+        if (node.cond)
+        {
+            startExpression();
+            auto* cond = evalScalar(*node.cond, DataType::I1, module);
+            finishExpression();
+            branch(cond, body, end);
+        }
+        else
+            jump(body);
 
-    void ASTCodeGen::visit(FE::AST::ContinueStmt& node, Module* m)
-    {
-        // TODO(Lab 3-2): 生成 continue 的无条件跳转至循环步进/条件块
-        (void)node;
-        (void)m;
-        TODO("Lab3-2: Implement ContinueStmt IR generation");
-    }
+        block = body;
+        loops.push_back({step, end});
+        generate(node.body, module);
+        loops.pop_back();
+        jump(step);
 
-    void ASTCodeGen::visit(FE::AST::ForStmt& node, Module* m)
-    {
-        // TODO(Lab 3-2): 生成 for 循环 IR（init/cond/body/step 基本块与循环标签）
-        (void)node;
-        (void)m;
-        TODO("Lab3-2: Implement ForStmt IR generation");
+        block = step;
+        if (node.step)
+        {
+            startExpression();
+            eval(*node.step, module);
+            finishExpression();
+        }
+        jump(test);
+        block = end;
+        locals.pop_back();
     }
 }  // namespace ME

@@ -13,6 +13,8 @@ namespace FE::AST
       public:
         size_t trueTar;
         size_t falseTar;
+        std::vector<int> shape;
+        int              extentParameter = -1;
 
       public:
         ExprNode(int line_num = -1, int col_num = -1)
@@ -27,11 +29,10 @@ namespace FE::AST
     };
 
     // 左值表达式，这里粗略指代允许出现在赋值号左边的表达式
-    // 其中的 isLval 标记该表达式是否真的是左值
     class LeftValExpr : public ExprNode
     {
       public:
-        bool                    isLval;
+        bool                    writable = false;
         Entry*                  entry;
         std::vector<ExprNode*>* indices;
 

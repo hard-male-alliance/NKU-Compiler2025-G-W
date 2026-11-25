@@ -71,3 +71,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND SYSY_TEST_CLANG AND SYSY_TEST_LLVM_AS
             --build-dir "${PROJECT_BINARY_DIR}")
     set_tests_properties(toolchain-user-journey PROPERTIES TIMEOUT 90)
 endif()
+
+add_test(NAME lab3-semantics
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/lab3_test.py"
+        --compiler "$<TARGET_FILE:compiler>" --work-dir "${PROJECT_SOURCE_DIR}/.temp")
+set_tests_properties(lab3-semantics PROPERTIES TIMEOUT 45)
+
+if(SYSY_TEST_CLANG)
+    add_test(NAME lab3-tensor-journey
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/lab3_test.py"
+            --compiler "$<TARGET_FILE:compiler>" --work-dir "${PROJECT_SOURCE_DIR}/.temp"
+            --clang "${SYSY_TEST_CLANG}" --runtime "$<TARGET_FILE:sysy_runtime>")
+    set_tests_properties(lab3-tensor-journey PROPERTIES TIMEOUT 90)
+endif()

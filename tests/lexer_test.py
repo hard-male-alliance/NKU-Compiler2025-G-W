@@ -125,7 +125,7 @@ def boundaries(compiler, work):
         require([row[:3] for row in baseline] == [row[:3] for row in decorated],
                 "Comment/whitespace insertion changed the token sequence")
 
-    invalid = ["@", "&", "|", ".", "09", "0x", "0xG", "0x1.2", "0x.p2",
+    invalid = ["^", "&", "|", ".", "09", "0x", "0xG", "0x1.2", "0x.p2",
                "1e", "1e+", "1e-", "0x1p", "0x1p-", "1.2.3", "123abc", "1.0f",
                "1u", "1LL", "9223372036854775808", "18446744073709551616",
                "1e999", "1e-999", "0x1p128", "0x1p-999", "/* open", '"open',

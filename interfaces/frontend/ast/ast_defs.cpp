@@ -99,3 +99,24 @@ namespace FE::AST
         return obj->floatValue;
     }
 }  // namespace FE::AST
+
+namespace FE::AST
+{
+    namespace
+    {
+        struct TensorType final : Type
+        {
+            Type_t element;
+            explicit TensorType(Type_t element) : element(element) {}
+            std::string toString() const override { return element == Type_t::INT ? "tensor int" : "tensor float"; }
+            Type_t      getBaseType() const override { return element; }
+            TypeGroup   getTypeGroup() const override { return TypeGroup::TENSOR; }
+        };
+    }  // namespace
+
+    Type* tensorType(Type* element)
+    {
+        static TensorType integer(Type_t::INT), floating(Type_t::FLOAT);
+        return element == intType ? &integer : &floating;
+    }
+}  // namespace FE::AST

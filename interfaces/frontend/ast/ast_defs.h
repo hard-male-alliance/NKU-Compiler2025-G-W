@@ -7,9 +7,10 @@
 #include <array>
 #include <map>
 
-#define AST_TYPEGROUP_DECL  \
-    X(BASIC, basic type, 0) \
-    X(POINTER, pointer type, 1)
+#define AST_TYPEGROUP_DECL      \
+    X(BASIC, basic type, 0)     \
+    X(POINTER, pointer type, 1) \
+    X(TENSOR, tensor type, 2)
 
 #define AST_BASETYPE_DECL                                                           \
     X(UNK, unknown type, 0)                                                         \
@@ -37,7 +38,8 @@
     X(BITAND, &, 14)            \
     X(AND, &&, 15)              \
     X(OR, ||, 16)               \
-    X(ASSIGN, =, 17)
+    X(ASSIGN, =, 17)            \
+    X(MATMUL, @, 18)
 
 namespace FE::AST
 {
@@ -139,6 +141,12 @@ namespace FE::AST
     extern Type* llType;
     extern Type* floatType;
 
+    Type*        tensorType(Type* element);
+    inline bool  isTensor(Type* t) { return t->getTypeGroup() == TypeGroup::TENSOR; }
+    inline Type* elementType(Type* t) { return TypeFactory::getBasicType(t->getBaseType()); }
+    inline bool  isNumeric(Type* t)
+    { return t->getTypeGroup() == TypeGroup::BASIC && t != voidType && t->getBaseType() != Type_t::UNK; }
+
     enum class Operator
     {
 #define X(name, lname, idx) name = idx,
@@ -234,6 +242,7 @@ namespace FE::AST
         bool  isConstDecl;
         Type* type;
         int   scopeLevel;
+        int   extentParameter = -1;
 
         std::vector<int>      arrayDims;
         std::vector<VarValue> initList;

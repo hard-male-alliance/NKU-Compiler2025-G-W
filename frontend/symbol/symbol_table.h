@@ -9,7 +9,12 @@ namespace FE::Sym
     class SymTable : public iSymTable<SymTable>
     {
         friend iSymTable<SymTable>;
+        std::vector<std::map<Entry*, FE::AST::VarAttr>> scopes{1};
 
+      public:
+        bool containsLocal(Entry* entry) const { return scopes.back().find(entry) != scopes.back().end(); }
+
+      private:
         void reset_impl();
 
         void              addSymbol_impl(Entry* entry, FE::AST::VarAttr& attr);

@@ -42,6 +42,8 @@ namespace FE::AST
         Entry*                         entry;
         std::vector<ParamDeclarator*>* params;
         StmtNode*                      body;
+        std::vector<int>               returnShape;
+        int                            returnExtentParameter = -1;
 
       public:
         FuncDeclStmt(Type* retType, Entry* entry, std::vector<ParamDeclarator*>* params, StmtNode* body = nullptr,

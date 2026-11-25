@@ -165,7 +165,7 @@ def rejection_properties(compiler: str, work: Path) -> None:
     invalid = ["", "int main( {", "int main(){ return 1 }", "int main(){int a[2;}",
         "int main(){int a={1,};}", "int main(){f(,1);}", "int main(){if(1) else ;}",
         "int main(){(1+2)=3;}", "int main(){return 0;} int broken(",
-        "int main(){} @", "int main(){} /* open", "int main(){return 09;}",
+        "int main(){} ^", "int main(){} /* open", "int main(){return 09;}",
         "return 1;", "int main(){int nested(){return 0;}}", "int main(){if(1) int a;}"]
     for source in invalid:
         result, output = run_parser(compiler, work, source)

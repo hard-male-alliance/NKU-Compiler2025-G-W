@@ -13,6 +13,7 @@ add_library(sysy_middleend OBJECT
     visitor/codegen/decl_codegen.cpp
     visitor/codegen/expr_codegen.cpp
     visitor/codegen/stmt_codegen.cpp
+    visitor/codegen/tensor_codegen.cpp
     visitor/codegen/type_convert.cpp
     visitor/printer/inst_printer.cpp
     visitor/printer/module_printer.cpp

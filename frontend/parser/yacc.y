@@ -83,14 +83,15 @@
 %token END
 
 // Lab1 token payloads preserve the framework's printed token names and values.
-%token INT FLOAT VOID
+%token INT FLOAT VOID TENSOR
 %token <long long> LL_CONST
 %token <float> FLOAT_CONST
-%token PLUS MINUS STAR SLASH MOD ASSIGN
+%token PLUS MINUS STAR SLASH MOD ASSIGN AT
 %token LT GT LE GE EQ NE NOT AND OR
 
 %nterm <FE::AST::Operator> UNARY_OP
 %nterm <FE::AST::Type*> TYPE
+%nterm <std::string> NAME
 %nterm <std::unique_ptr<FE::AST::ExprNode>> LITERAL_EXPR BASIC_EXPR FUNC_CALL_EXPR UNARY_EXPR MULDIV_EXPR ADDSUB_EXPR RELATIONAL_EXPR EQUALITY_EXPR LOGICAL_AND_EXPR LOGICAL_OR_EXPR ASSIGN_EXPR NOCOMMA_EXPR EXPR ARRAY_DIMENSION_EXPR LEFT_VAL_EXPR OPTIONAL_EXPR
 %nterm <std::unique_ptr<FE::AST::StmtNode>> EXPR_STMT VAR_DECL_STMT BLOCK_STMT FUNC_DECL_STMT RETURN_STMT WHILE_STMT IF_STMT BREAK_STMT CONTINUE_STMT FOR_STMT STMT BLOCK_ITEM TOP_LEVEL_ITEM FOR_INIT
 %nterm <std::unique_ptr<FE::AST::InitDecl>> INITIALIZER
@@ -176,7 +177,7 @@ VAR_DECL_STMT:
     ;
 
 FUNC_DECL_STMT:
-    TYPE IDENT LPAREN PARAM_DECLARATOR_LIST RPAREN BLOCK_STMT {
+    TYPE NAME LPAREN PARAM_DECLARATOR_LIST RPAREN BLOCK_STMT {
         $$.reset(new FuncDeclStmt($1, Entry::getEntry($2), $4.release(), $6.release(), @1.begin.line, @1.begin.column));
     }
     ;
@@ -212,20 +213,20 @@ WHILE_STMT:
     ;
 
 PARAM_DECLARATOR:
-    TYPE IDENT {
+    TYPE NAME {
         $$.reset(new ParamDeclarator($1, Entry::getEntry($2), nullptr, @1.begin.line, @1.begin.column));
     }
-    | TYPE IDENT LBRACKET RBRACKET {
+    | TYPE NAME LBRACKET RBRACKET {
         auto* dims = new std::vector<ExprNode*>();
         dims->push_back(new LiteralExpr(-1, @3.begin.line, @3.begin.column));
         $$.reset(new ParamDeclarator($1, Entry::getEntry($2), dims, @1.begin.line, @1.begin.column));
     }
-    | TYPE IDENT LBRACKET RBRACKET ARRAY_DIMENSION_EXPR_LIST {
+    | TYPE NAME LBRACKET RBRACKET ARRAY_DIMENSION_EXPR_LIST {
         $5->insert($5->begin(), new LiteralExpr(-1, @3.begin.line, @3.begin.column));
         $$.reset(new ParamDeclarator($1, Entry::getEntry($2), $5.release(), @1.begin.line, @1.begin.column));
     }
     // The supplied witharray fixture also uses a sized first parameter dimension.
-    | TYPE IDENT ARRAY_DIMENSION_EXPR_LIST {
+    | TYPE NAME ARRAY_DIMENSION_EXPR_LIST {
         $$.reset(new ParamDeclarator($1, Entry::getEntry($2), $3.release(), @1.begin.line, @1.begin.column));
     }
     ;
@@ -326,6 +327,7 @@ ADDSUB_EXPR:
 MULDIV_EXPR:
     UNARY_EXPR { $$ = std::move($1); }
     | MULDIV_EXPR STAR UNARY_EXPR { $$.reset(new BinaryExpr(Operator::MUL, $1.release(), $3.release(), @1.begin.line, @1.begin.column)); }
+    | MULDIV_EXPR AT UNARY_EXPR { $$.reset(new BinaryExpr(Operator::MATMUL, $1.release(), $3.release(), @1.begin.line, @1.begin.column)); }
     | MULDIV_EXPR SLASH UNARY_EXPR { $$.reset(new BinaryExpr(Operator::DIV, $1.release(), $3.release(), @1.begin.line, @1.begin.column)); }
     | MULDIV_EXPR MOD UNARY_EXPR { $$.reset(new BinaryExpr(Operator::MOD, $1.release(), $3.release(), @1.begin.line, @1.begin.column)); }
     ;
@@ -343,7 +345,7 @@ BASIC_EXPR:
     ;
 
 FUNC_CALL_EXPR:
-    IDENT LPAREN RPAREN {
+    NAME LPAREN RPAREN {
         std::string funcName = $1;
         if (funcName != "starttime" && funcName != "stoptime")
         {
@@ -358,7 +360,7 @@ FUNC_CALL_EXPR:
             $$.reset(new CallExpr(Entry::getEntry(funcName), args, @1.begin.line, @1.begin.column));
         }
     }
-    | IDENT LPAREN EXPR_LIST RPAREN {
+    | NAME LPAREN EXPR_LIST RPAREN {
         Entry* entry = Entry::getEntry($1);
         $$.reset(new CallExpr(entry, $3.release(), @1.begin.line, @1.begin.column));
     }
@@ -375,8 +377,8 @@ ARRAY_DIMENSION_EXPR_LIST:
     ;
 
 LEFT_VAL_EXPR:
-    IDENT { $$.reset(new LeftValExpr(Entry::getEntry($1), nullptr, @1.begin.line, @1.begin.column)); }
-    | IDENT ARRAY_DIMENSION_EXPR_LIST {
+    NAME { $$.reset(new LeftValExpr(Entry::getEntry($1), nullptr, @1.begin.line, @1.begin.column)); }
+    | NAME ARRAY_DIMENSION_EXPR_LIST {
         $$.reset(new LeftValExpr(Entry::getEntry($1), $2.release(), @1.begin.line, @1.begin.column));
     }
     ;
@@ -387,10 +389,18 @@ LITERAL_EXPR:
     | FLOAT_CONST { $$.reset(new LiteralExpr($1, @1.begin.line, @1.begin.column)); }
     ;
 
+/* Keep existing SysY identifiers spelled "tensor" valid outside type syntax. */
+NAME:
+    IDENT { $$ = std::move($1); }
+    | TENSOR { $$ = "tensor"; }
+    ;
+
 TYPE:
     INT { $$ = intType; }
     | FLOAT { $$ = floatType; }
     | VOID { $$ = voidType; }
+    | TENSOR INT { $$ = tensorType(intType); }
+    | TENSOR FLOAT { $$ = tensorType(floatType); }
     ;
 
 UNARY_OP:

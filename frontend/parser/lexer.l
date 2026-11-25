@@ -61,6 +61,7 @@ OPEN_STRING \"([^\"\\\r\n]|\\[^\r\n])*\\?
 
 "int"                  { RETT(INT) }
 "float"                { RETT(FLOAT) }
+"tensor"               { RETT(TENSOR) }
 "void"                 { RETT(VOID) }
 "const"                { RETT(CONST) }
 "if"                   { RETT(IF) }
@@ -100,6 +101,7 @@ OPEN_STRING \"([^\"\\\r\n]|\\[^\r\n])*\\?
 "+"                    { RETT(PLUS) }
 "-"                    { RETT(MINUS) }
 "*"                    { RETT(STAR) }
+"@"                    { RETT(AT) }
 "/"                    { RETT(SLASH) }
 "%"                    { RETT(MOD) }
 "="                    { RETT(ASSIGN) }

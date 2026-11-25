@@ -1,85 +1,115 @@
 #include <frontend/ast/visitor/sementic_check/ast_checker.h>
-#include <debug.h>
 
 namespace FE::AST
 {
-    bool ASTChecker::visit(ExprStmt& node)
+    bool ASTChecker::condition(ExprNode* node)
     {
-        // 示例实现：表达式语句的语义检查
-        // 空表达式直接通过，否则访问内部表达式
-        if (!node.expr) return true;
-        return apply(*this, *node.expr);
+        return check(node) &&
+               (!node || isNumeric(node->attr.val.value.type) || error(*node, "condition must be a numeric scalar"));
     }
+
+    bool ASTChecker::visit(ExprStmt& node) { return check(node.expr); }
 
     bool ASTChecker::visit(FuncDeclStmt& node)
     {
-        // TODO(Lab3-1): 实现函数声明的语义检查
-        // 检查作用域，记录函数信息，处理形参和函数体，检查返回语句
-        (void)node;
-        TODO("Lab3-1: Implement FuncDeclStmt semantic checking");
+        if (symTable.containsLocal(node.entry) || !funcDecls.emplace(node.entry, &node).second)
+            return error(node, "redefinition of " + node.entry->getName());
+        bool ok = true;
+        if (node.entry == Entry::getEntry("main") &&
+            (node.retType != intType || (node.params && !node.params->empty())))
+            ok = error(node, "main must have signature int main()");
+        currentFunction = &node;
+        node.returnShape.clear();
+        node.returnExtentParameter = -1;
+        recursiveTensorCall        = false;
+        inferReturnShape           = true;
+        symTable.enterScope();
+        if (node.params)
+        {
+            parameterIndex = 0;
+            for (auto* param : *node.params)
+            {
+                ok &= check(param);
+                ++parameterIndex;
+            }
+        }
+        const size_t beforeBody = errors.size();
+        bool         bodyOK     = check(node.body);
+        if (recursiveTensorCall && !node.returnShape.empty())
+        {
+            // Recheck calls against the settled signature, not a provisional extent.
+            inferReturnShape = false;
+            errors.resize(beforeBody);
+            bodyOK = check(node.body);
+        }
+        symTable.exitScope();
+        currentFunction = nullptr;
+        if (isTensor(node.retType) && node.returnShape.empty())
+            ok &= error(node, "cannot infer tensor return shape from any return expression");
+        return ok && bodyOK;
     }
 
-    bool ASTChecker::visit(VarDeclStmt& node)
-    {
-        // TODO(Lab3-1): 实现变量声明语句的语义检查
-        // 空声明直接通过，否则委托给变量声明处理
-        (void)node;
-        TODO("Lab3-1: Implement VarDeclStmt semantic checking");
-    }
+    bool ASTChecker::visit(VarDeclStmt& node) { return check(node.decl); }
 
     bool ASTChecker::visit(BlockStmt& node)
     {
-        // TODO(Lab3-1): 实现块语句的语义检查
-        // 进入新作用域，逐条访问语句，退出作用域
-        (void)node;
-        TODO("Lab3-1: Implement BlockStmt semantic checking");
+        symTable.enterScope();
+        bool ok = true;
+        for (auto* stmt : *node.stmts) ok &= check(stmt);
+        symTable.exitScope();
+        return ok;
     }
 
     bool ASTChecker::visit(ReturnStmt& node)
     {
-        // TODO(Lab3-1): 实现返回语句的语义检查
-        // 设置返回标记，检查作用域，检查返回值类型匹配
-        (void)node;
-        TODO("Lab3-1: Implement ReturnStmt semantic checking");
+        Type* target = currentFunction->retType;
+        if (!node.retExpr) return target == voidType || error(node, "return requires a value");
+        if (!check(node.retExpr)) return false;
+        Type* source = node.retExpr->attr.val.value.type;
+        if (!isTensor(target))
+            return (isNumeric(target) && isNumeric(source)) || error(node, "incompatible return type");
+        if (source != target) return error(node, "incompatible tensor return element type");
+        auto&       result = currentFunction->returnShape;
+        const auto& shape  = node.retExpr->shape;
+        if (!result.empty() && !compatibleShape(result, shape)) return error(node, "incompatible tensor return shape");
+        if (inferReturnShape && (result.empty() || (result.front() < 0 && shape.front() > 0)))
+        {
+            result                                 = shape;
+            currentFunction->returnExtentParameter = node.retExpr->extentParameter;
+        }
+        return true;
     }
 
     bool ASTChecker::visit(WhileStmt& node)
     {
-        // TODO(Lab3-1): 实现while循环的语义检查
-        // 检查作用域，访问条件表达式，管理循环深度，访问循环体
-        (void)node;
-        TODO("Lab3-1: Implement WhileStmt semantic checking");
+        bool ok = condition(node.cond);
+        ++loopDepth;
+        ok &= check(node.body);
+        --loopDepth;
+        return ok;
     }
 
     bool ASTChecker::visit(IfStmt& node)
     {
-        // TODO(Lab3-1): 实现if语句的语义检查
-        // 检查作用域，访问条件表达式，分别访问then和else分支
-        (void)node;
-        TODO("Lab3-1: Implement IfStmt semantic checking");
+        bool ok = condition(node.cond);
+        ok &= check(node.thenStmt);
+        ok &= check(node.elseStmt);
+        return ok;
     }
 
-    bool ASTChecker::visit(BreakStmt& node)
-    {
-        // TODO(Lab3-1): 实现break语句的语义检查
-        // 检查是否在循环内使用
-        (void)node;
-        TODO("Lab3-1: Implement BreakStmt semantic checking");
-    }
-
-    bool ASTChecker::visit(ContinueStmt& node)
-    {
-        // TODO(Lab3-1): 实现continue语句的语义检查
-        // 检查是否在循环内使用
-        (void)node;
-        TODO("Lab3-1: Implement ContinueStmt semantic checking");
-    }
+    bool ASTChecker::visit(BreakStmt& node) { return loopDepth || error(node, "break outside loop"); }
+    bool ASTChecker::visit(ContinueStmt& node) { return loopDepth || error(node, "continue outside loop"); }
 
     bool ASTChecker::visit(ForStmt& node)
     {
-        // TODO(Lab3-1): 实现for循环的语义检查
-        // 检查作用域，访问初始化、条件、步进表达式，管理循环深度
-        (void)node;
-        TODO("Lab3-1: Implement ForStmt semantic checking");
+        symTable.enterScope();
+        bool ok = check(node.init);
+        ok &= condition(node.cond);
+        ok &= check(node.step);
+        ++loopDepth;
+        ok &= check(node.body);
+        --loopDepth;
+        symTable.exitScope();
+        return ok;
     }
 }  // namespace FE::AST

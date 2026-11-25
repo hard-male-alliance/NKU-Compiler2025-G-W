@@ -37,11 +37,12 @@ namespace ME
 
     ImmeF32Operand* OperandFactory::getImmeF32Operand(float value)
     {
-        auto it = ImmeF32OperandMap.find(value);
+        const int bits = FLOAT_TO_INT_BITS(value);
+        auto      it   = ImmeF32OperandMap.find(bits);
         if (it == ImmeF32OperandMap.end())
         {
             ImmeF32Operand* op       = new ImmeF32Operand(value);
-            ImmeF32OperandMap[value] = op;
+            ImmeF32OperandMap[bits]  = op;
             return op;
         }
         return it->second;

@@ -7,33 +7,21 @@
 #include <frontend/ast/expr.h>
 #include <frontend/ast/stmt.h>
 #include <frontend/symbol/symbol_table.h>
+#include <memory>
+#include <optional>
 #include <vector>
 
 namespace FE::AST
 {
-    /*
-     * Lab 3-1: 语义分析器 (Semantic Analyzer)
-     *
-     * 本文件定义了 ASTChecker 类，用于遍历 AST 并执行语义检查。
-     * 大部分 visit 方法已改为 TODO，需要你自己实现。
-     *
-     * 已保留的示例实现：
-     * - libFuncRegister(): 注册 SysY 标准库函数
-     * - visit(LiteralExpr&): 字面量表达式检查
-     * - visit(ExprStmt&): 表达式语句检查
-     * - visit(Initializer&): 初始化器检查
-     * - visit(InitializerList&): 初始化器列表检查
-     *
-     * 需要实现的主要功能：
-     * 1. 符号表管理 (作用域进入/退出，符号查找/添加)
-     * 2. 类型检查 (变量类型、函数参数匹配、返回值检查等)
-     * 3. 语义错误检测 (重定义、未定义、非法操作等)
-     * 4. 常量折叠 (编译期常量计算)
-     * 5. 控制流检查 (break/continue 在循环内，return 在函数内等)
-     */
+    // A negative extent denotes the first dimension of a tensor parameter.
+    inline bool compatibleShape(const std::vector<int>& a, const std::vector<int>& b)
+    {
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); ++i)
+            if (a[i] >= 0 && b[i] >= 0 && a[i] != b[i]) return false;
+        return true;
+    }
 
-    // 此处的 Visitor_t<bool> 声明访问者返回 bool 类型，不需要函数参数
-    // 我们使用它返回的 bool 来表示语义检查是否通过。如果存在语义错误，则返回 false
     using Checker_t = Visitor_t<bool>;
 
     class ASTChecker : public Checker_t
@@ -43,53 +31,29 @@ namespace FE::AST
         std::map<FE::Sym::Entry*, VarAttr>       glbSymbols;
         std::map<FE::Sym::Entry*, FuncDeclStmt*> funcDecls;
 
-        bool mainExists;
+        std::vector<std::unique_ptr<FuncDeclStmt>> builtins;
 
-        bool  funcHasReturn;
-        Type* curFuncRetType;
+        FuncDeclStmt*   currentFunction     = nullptr;
+        VarDeclaration* currentDeclaration  = nullptr;
+        size_t          loopDepth           = 0;
+        int             parameterIndex      = 0;
+        bool            recursiveTensorCall = false;
+        bool            inferReturnShape    = true;
 
-        size_t loopDepth;
+        bool error(const Node& node, const std::string& message);
+        bool check(Node* node) { return !node || apply(*this, *node); }
+        bool condition(ExprNode* node);
+        bool dimensions(const std::vector<ExprNode*>* exprs, std::vector<int>& shape, bool parameter, bool tensor);
+        bool flatten(InitDecl& init, const std::vector<int>& spans, size_t level, int offset,
+            std::vector<std::pair<int, ExprNode*>>& values, bool tensor);
+        std::optional<VarValue> tensorConstant(ExprNode& expr, int index);
+        bool                    tensorBinary(BinaryExpr& node, Type* lhs, Type* rhs);
 
       public:
         std::vector<std::string> errors;
 
-        ASTChecker()
-            : symTable(),
-              glbSymbols(),
-              funcDecls(),
-              mainExists(false),
-              funcHasReturn(false),
-              curFuncRetType(voidType),
-              loopDepth(0),
-              errors()
-        {
-            libFuncRegister();
-        }
+        ASTChecker() { libFuncRegister(); }
 
-        ~ASTChecker()
-        {
-            const char* libFuncNames[] = {"getint",
-                "getch",
-                "getarray",
-                "getfloat",
-                "getfarray",
-                "putint",
-                "putch",
-                "putarray",
-                "putfloat",
-                "putfarray",
-                "_sysy_starttime",
-                "_sysy_stoptime"};
-
-            for (const char* name : libFuncNames)
-            {
-                FE::Sym::Entry* entry = FE::Sym::Entry::getEntry(name);
-                auto            it    = funcDecls.find(entry);
-                if (it != funcDecls.end()) delete it->second;
-            }
-        }
-
-      public:
         const std::map<FE::Sym::Entry*, VarAttr>&       getGlbSymbols() const { return glbSymbols; }
         const std::map<FE::Sym::Entry*, FuncDeclStmt*>& getFuncDecls() const { return funcDecls; }
 
@@ -124,16 +88,10 @@ namespace FE::AST
         bool visit(ContinueStmt& node) override;
         bool visit(ForStmt& node) override;
 
-        // 该函数向符号表中注册 SysY 的库函数，以便在语义检查时获取它们的信息
-        // 示例实现已提供，展示如何创建函数声明并加入 funcDecls
         void libFuncRegister();
 
       private:
-        // 这两个辅助函数用于对一元/二元表达式做类型推断与常量折叠（若可能）
-        // Const Decl 的变量以及 LiteralExpr 节点中的字面量都可被视为编译期常量
-        // 对单元表达式，若 isConstexpr 为 true，则返回的 Value 也为编译期常量
-        ExprValue typeInfer(const ExprValue& operand, Operator op, const Node& node, bool& hasError);
-        // 对二元表达式，若 lhs 与 rhs 的 isConstexpr 都为 true，则返回的 Value 也为编译期常量
+        ExprValue typeInfer(const ExprValue& operand, Operator op);
         ExprValue typeInfer(const ExprValue& lhs, const ExprValue& rhs, Operator op, const Node& node, bool& hasError);
     };
 }  // namespace FE::AST

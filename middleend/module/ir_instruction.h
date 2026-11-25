@@ -163,6 +163,7 @@ namespace ME
         DataType         dt;
         Operand*         res;
         std::vector<int> dims;
+        Operand*         elementCount = nullptr;
 
       public:
         AllocaInst(DataType t, Operand* r, std::vector<int> d = {}, const std::string& c = "")

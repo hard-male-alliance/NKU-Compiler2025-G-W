@@ -2,98 +2,173 @@
 
 namespace ME
 {
-    void ASTCodeGen::visit(FE::AST::LeftValExpr& node, Module* m)
+    using namespace FE::AST;
+
+    ASTCodeGen::Value ASTCodeGen::eval(ExprNode& node, Module* module)
     {
-        // TODO(Lab 3-2): 生成左值表达式的取址/取值 IR
-        // 查找变量位置（全局或局部），处理数组下标/GEP，必要时发出load
-        (void)node;
-        (void)m;
-        TODO("Lab3-2: Implement LeftValExpr IR generation");
+        if (node.attr.val.isConstexpr) return {constant(node.attr.val.value)};
+        apply(*this, node, module);
+        return result;
     }
 
-    void ASTCodeGen::visit(FE::AST::LiteralExpr& node, Module* m)
+    Operand* ASTCodeGen::evalScalar(ExprNode& node, DataType dest, Module* module)
     {
-        (void)m;
+        auto value = eval(node, module);
+        return cast(value.data, exprType(node), dest);
+    }
 
-        size_t reg = getNewRegId();
-        switch (node.literal.type->getBaseType())
+    ASTCodeGen::Value ASTCodeGen::address(LeftValExpr& node, Module* module)
+    {
+        const auto& slot = lookup(node.entry);
+        if (!node.indices) return slot.value;
+
+        Operand*    offset = nullptr;
+        const auto& shape  = slot.shape;
+        for (size_t i = 0; i < node.indices->size(); ++i)
         {
-            case FE::AST::Type_t::INT:
-            case FE::AST::Type_t::LL:  // treat as I32
-            {
-                int             val  = node.literal.getInt();
-                ArithmeticInst* inst = createArithmeticI32Inst_ImmeAll(Operator::ADD, val, 0, reg);  // reg = val + 0
-                insert(inst);
-                break;
-            }
-            case FE::AST::Type_t::FLOAT:
-            {
-                float           val  = node.literal.getFloat();
-                ArithmeticInst* inst = createArithmeticF32Inst_ImmeAll(Operator::FADD, val, 0, reg);  // reg = val + 0
-                insert(inst);
-                break;
-            }
-            default: ERROR("Unsupported literal type");
+            auto* idx = evalScalar(*(*node.indices)[i], DataType::I32, module);
+            offset    = offset ? arithmetic(Operator::ADD,
+                                     DataType::I32,
+                                     arithmetic(Operator::MUL, DataType::I32, offset, imm(shape[i])),
+                                     idx)
+                               : idx;
+        }
+        int remaining = span(shape, node.indices->size());
+        if (remaining != 1) offset = arithmetic(Operator::MUL, DataType::I32, offset, imm(remaining));
+        return {gep(slot.element, slot.value.data, offset)};
+    }
+
+    void ASTCodeGen::visit(LeftValExpr& node, Module* module)
+    {
+        auto value = address(node, module);
+        if (node.shape.empty()) value.data = load(exprType(node), value.data);
+        result = value;
+    }
+
+    void ASTCodeGen::visit(LiteralExpr& node, Module*) { result = {constant(node.literal)}; }
+
+    void ASTCodeGen::visit(UnaryExpr& node, Module* module)
+    {
+        using A    = FE::AST::Operator;
+        auto value = eval(*node.expr, module);
+        if (isTensor(node.attr.val.value.type))
+        {
+            result = tensorUnary(node, value);
+            return;
+        }
+        auto dt = exprType(*node.expr);
+        if (node.op == A::NOT)
+            result = {dt == DataType::F32 ? compare(FCmpOp::OEQ, value.data, getImmeF32Operand(0))
+                                          : compare(ICmpOp::EQ, cast(value.data, dt, DataType::I32), imm(0))};
+        else
+        {
+            auto  out     = exprType(node);
+            auto* operand = cast(value.data, dt, out);
+            result        = {node.op == A::ADD ? operand : negate(out, operand)};
         }
     }
 
-    void ASTCodeGen::visit(FE::AST::UnaryExpr& node, Module* m)
+    ASTCodeGen::Value ASTCodeGen::logical(BinaryExpr& node, Module* module)
     {
-        // TODO(Lab 3-2): 生成一元运算的 IR（访问操作数、必要的类型转换、发出运算指令）
-        (void)node;
-        (void)m;
-        TODO("Lab3-2: Implement UnaryExpr IR generation");
+        bool  isAnd   = node.op == FE::AST::Operator::AND;
+        auto* left    = evalScalar(*node.lhs, DataType::I1, module);
+        auto* leftEnd = block;
+        auto* rhs     = newBlock();
+        auto* join    = newBlock();
+        branch(left, isAnd ? rhs : join, isAnd ? join : rhs);
+
+        block          = rhs;
+        auto* right    = evalScalar(*node.rhs, DataType::I1, module);
+        auto* rightEnd = block;
+        jump(join);
+
+        block       = join;
+        auto* value = reg();
+        auto* phi   = new PhiInst(DataType::I1, value);
+        phi->addIncoming(imm(!isAnd), getLabelOperand(leftEnd->blockId));
+        phi->addIncoming(right, getLabelOperand(rightEnd->blockId));
+        emit(phi);
+        return {value};
     }
 
-    void ASTCodeGen::handleAssign(FE::AST::LeftValExpr& lhs, FE::AST::ExprNode& rhs, Module* m)
+    ASTCodeGen::Value ASTCodeGen::assign(BinaryExpr& node, Module* module)
     {
-        // TODO(Lab 3-2): 生成赋值语句的 IR（计算右值、类型转换、store 到左值地址）
-        (void)lhs;
-        (void)rhs;
-        (void)m;
-        TODO("Lab3-2: Implement assignment IR generation");
-    }
-    void ASTCodeGen::handleLogicalAnd(
-        FE::AST::BinaryExpr& node, FE::AST::ExprNode& lhs, FE::AST::ExprNode& rhs, Module* m)
-    {
-        // TODO(Lab 3-2): 生成短路与的基本块与条件分支
-        (void)node;
-        (void)lhs;
-        (void)rhs;
-        (void)m;
-        TODO("Lab3-2: Implement logical AND codegen");
-    }
-    void ASTCodeGen::handleLogicalOr(
-        FE::AST::BinaryExpr& node, FE::AST::ExprNode& lhs, FE::AST::ExprNode& rhs, Module* m)
-    {
-        // TODO(Lab 3-2): 生成短路或的基本块与条件分支
-        (void)node;
-        (void)lhs;
-        (void)rhs;
-        (void)m;
-        TODO("Lab3-2: Implement logical OR codegen");
-    }
-    void ASTCodeGen::visit(FE::AST::BinaryExpr& node, Module* m)
-    {
-        // TODO(Lab 3-2): 生成二元表达式 IR（含赋值、逻辑与/或、算术/比较）
-        (void)node;
-        (void)m;
-        TODO("Lab3-2: Implement BinaryExpr IR generation");
+        auto dest  = address(static_cast<LeftValExpr&>(*node.lhs), module);
+        auto value = eval(*node.rhs, module);
+        if (isTensor(node.attr.val.value.type))
+        {
+            copy(dest, value, node.shape);
+            return dest;
+        }
+        auto  dt     = exprType(node);
+        auto* scalar = cast(value.data, exprType(*node.rhs), dt);
+        store(dt, scalar, dest.data);
+        return {scalar};
     }
 
-    void ASTCodeGen::visit(FE::AST::CallExpr& node, Module* m)
+    void ASTCodeGen::visit(BinaryExpr& node, Module* module)
     {
-        // TODO(Lab 3-2): 生成函数调用 IR（准备参数、可选返回寄存器、发出call）
-        (void)node;
-        (void)m;
-        TODO("Lab3-2: Implement CallExpr IR generation");
+        using A = FE::AST::Operator;
+        if (node.op == A::ASSIGN)
+        {
+            result = assign(node, module);
+            return;
+        }
+        if (node.op == A::AND || node.op == A::OR)
+        {
+            result = logical(node, module);
+            return;
+        }
+
+        auto lhs = eval(*node.lhs, module);
+        auto rhs = eval(*node.rhs, module);
+        if (isTensor(node.attr.val.value.type))
+        {
+            result = tensorBinary(node, lhs, rhs);
+            return;
+        }
+        auto  lt = exprType(*node.lhs);
+        auto  rt = exprType(*node.rhs);
+        auto  dt = lt == DataType::F32 || rt == DataType::F32 ? DataType::F32 : DataType::I32;
+        auto* a  = cast(lhs.data, lt, dt);
+        auto* b  = cast(rhs.data, rt, dt);
+        result   = {scalarOp(node.op, dt, a, b)};
     }
 
-    void ASTCodeGen::visit(FE::AST::CommaExpr& node, Module* m)
+    void ASTCodeGen::visit(CallExpr& node, Module* module)
     {
-        // TODO(Lab 3-2): 依序生成逗号表达式每个子表达式的 IR
-        (void)node;
-        (void)m;
-        TODO("Lab3-2: Implement CommaExpr IR generation");
+        const auto&       decl = *functions.at(node.func);
+        CallInst::argList args;
+        Value             out;
+        auto              dt             = type(decl.retType);
+        Operand*          inferredExtent = nullptr;
+        if (node.args)
+        {
+            for (size_t i = 0; i < node.args->size(); ++i)
+            {
+                auto&       actual = *(*node.args)[i];
+                const auto* formal = (*decl.params)[i];
+                auto*       target = formal->attr.val.value.type;
+                auto        value  = eval(actual, module);
+                args.emplace_back(type(target), cast(value.data, exprType(actual), type(target)));
+                if (isTensor(target)) args.emplace_back(DataType::I32, value.first);
+                if (decl.returnExtentParameter == static_cast<int>(i)) inferredExtent = value.first;
+            }
+        }
+        if (isTensor(decl.retType))
+        {
+            dt        = DataType::VOID;
+            out.first = node.shape.front() > 0 ? imm(node.shape.front()) : inferredExtent;
+            out.data  = allocate(type(elementType(decl.retType)), elements(node.shape, out.first));
+            args.insert(args.begin(), {DataType::PTR, out.data});
+        }
+        if (dt != DataType::VOID) out.data = reg();
+        emit(new CallInst(dt, node.func->getName(), args, dt == DataType::VOID ? nullptr : out.data));
+        result = out;
+    }
+
+    void ASTCodeGen::visit(CommaExpr& node, Module* module)
+    {
+        for (auto* expr : *node.exprs) result = eval(*expr, module);
     }
 }  // namespace ME

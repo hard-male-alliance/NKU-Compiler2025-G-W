@@ -242,6 +242,7 @@ namespace FE::AST
         bool  isConstDecl;
         Type* type;
         int   scopeLevel;
+        int   extentParameter = -1;
 
         std::vector<int>      arrayDims;
         std::vector<VarValue> initList;

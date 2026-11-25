@@ -1,28 +1,29 @@
 #include <frontend/symbol/symbol_table.h>
-#include <debug.h>
+#include <cassert>
 
 namespace FE::Sym
 {
-    void SymTable::reset_impl() { TODO("Lab3-1: Reset symbol table"); }
+    void SymTable::reset_impl() { scopes.assign(1, {}); }
+    void SymTable::enterScope_impl() { scopes.emplace_back(); }
 
-    void SymTable::enterScope_impl() { TODO("Lab3-1: Enter new scope"); }
-
-    void SymTable::exitScope_impl() { TODO("Lab3-1: Exit current scope"); }
-
-    void SymTable::addSymbol_impl(Entry* entry, FE::AST::VarAttr& attr)
+    void SymTable::exitScope_impl()
     {
-        (void)entry;
-        (void)attr;
-        TODO("Lab3-1: Add symbol to current scope");
+        assert(scopes.size() > 1);
+        scopes.pop_back();
     }
+
+    void SymTable::addSymbol_impl(Entry* entry, FE::AST::VarAttr& attr) { scopes.back().insert_or_assign(entry, attr); }
 
     FE::AST::VarAttr* SymTable::getSymbol_impl(Entry* entry)
     {
-        (void)entry;
-        TODO("Lab3-1: Get symbol from symbol table");
+        for (auto scope = scopes.rbegin(); scope != scopes.rend(); ++scope)
+        {
+            auto it = scope->find(entry);
+            if (it != scope->end()) return &it->second;
+        }
+        return nullptr;
     }
 
-    bool SymTable::isGlobalScope_impl() { TODO("Lab3-1: Check if current scope is global scope"); }
-
-    int SymTable::getScopeDepth_impl() { TODO("Lab3-1: Get current scope depth"); }
+    bool SymTable::isGlobalScope_impl() { return scopes.size() == 1; }
+    int  SymTable::getScopeDepth_impl() { return static_cast<int>(scopes.size() - 1); }
 }  // namespace FE::Sym

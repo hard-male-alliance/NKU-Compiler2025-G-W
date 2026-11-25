@@ -71,6 +71,8 @@ namespace FE::AST
       public:
         ExprNode* lval;
         InitDecl* init;
+        VarAttr                                binding;
+        std::vector<std::pair<int, ExprNode*>> initializers;
 
       public:
         VarDeclarator(ExprNode* lval, InitDecl* init = nullptr, int line_num = -1, int col_num = -1)
@@ -88,6 +90,7 @@ namespace FE::AST
         Type*                   type;
         Entry*                  entry;
         std::vector<ExprNode*>* dims;
+        VarAttr                 binding;
 
       public:
         ParamDeclarator(

@@ -44,12 +44,15 @@ namespace ME
     {
         std::stringstream ss;
         ss << res << " = alloca ";
-        if (dims.empty()) { ss << dt << getComment(); }
+        if (dims.empty())
+            ss << dt;
         else
         {
             for (int dim : dims) ss << "[" << dim << " x ";
-            ss << dt << std::string(dims.size(), ']') << getComment();
+            ss << dt << std::string(dims.size(), ']');
         }
+        if (elementCount) ss << ", i32 " << elementCount;
+        ss << getComment();
         return ss.str();
     }
 
@@ -67,63 +70,39 @@ namespace ME
         return ss.str();
     }
 
-    void initArrayGlb(
-        std::ostream& s, DataType type, const FE::AST::VarAttr& v, size_t dimDph, size_t beginPos, size_t endPos)
+    static void initArrayGlb(std::ostream& out, DataType type, const FE::AST::VarAttr& value, size_t depth,
+        size_t start, size_t length, size_t explicitCount)
     {
-        if (dimDph == 0)
+        if (depth == value.arrayDims.size())
         {
-            bool allZero = true;
-            for (auto& initVal : v.initList)
-            {
-                if (initVal.type == FE::AST::boolType || initVal.type == FE::AST::intType ||
-                    initVal.type == FE::AST::llType)
-                {
-                    int iv = initVal.getInt();
-                    if (iv != 0) allZero = false;
-                }
-                if (initVal.type == FE::AST::floatType)
-                {
-                    float fv = initVal.getFloat();
-                    if (fv != 0.0f) allZero = false;
-                }
-                if (!allZero) break;
-            }
-
-            if (allZero)
-            {
-                for (size_t i = 0; i < v.arrayDims.size(); ++i) s << "[" << v.arrayDims[i] << " x ";
-                s << type << std::string(v.arrayDims.size(), ']') << " zeroinitializer";
-                return;
-            }
-        }
-
-        if (beginPos == endPos)
-        {
-            switch (type)
-            {
-                case DataType::I1:
-                case DataType::I32:
-                case DataType::I64: s << type << " " << v.initList[beginPos].getInt(); break;
-                case DataType::F32:
-                    s << type << " 0x" << std::hex << FLOAT_TO_DOUBLE_BITS(v.initList[beginPos].getFloat()) << std::dec;
-                    break;
-                default: ERROR("Unsupported data type in global array init");
-            }
+            out << type << " ";
+            if (start >= explicitCount)
+                out << "zeroinitializer";
+            else if (type == DataType::F32)
+                out << "0x" << std::hex << FLOAT_TO_DOUBLE_BITS(value.initList[start].getFloat()) << std::dec;
+            else
+                out << value.initList[start].getInt();
             return;
         }
 
-        for (size_t i = dimDph; i < v.arrayDims.size(); ++i) s << "[" << v.arrayDims[i] << " x ";
-        s << type << std::string(v.arrayDims.size() - dimDph, ']') << " [";
-
-        int step = std::accumulate(v.arrayDims.begin() + dimDph + 1, v.arrayDims.end(), 1, std::multiplies<int>());
-        for (int i = 0; i < v.arrayDims[dimDph]; ++i)
+        for (size_t i = depth; i < value.arrayDims.size(); ++i) out << "[" << value.arrayDims[i] << " x ";
+        out << type << std::string(value.arrayDims.size() - depth, ']');
+        if (start >= explicitCount || length == 0)
         {
-            if (i != 0) s << ",";
-            initArrayGlb(s, type, v, dimDph + 1, beginPos + i * step, beginPos + (i + 1) * step - 1);
+            out << " zeroinitializer";
+            return;
         }
-
-        s << "]";
+        out << " [";
+        const int    dim    = value.arrayDims[depth];
+        const size_t stride = length / dim;
+        for (int i = 0; i < dim; ++i)
+        {
+            if (i) out << ", ";
+            initArrayGlb(out, type, value, depth + 1, start + i * stride, stride, explicitCount);
+        }
+        out << "]";
     }
+
     std::string GlbVarDeclInst::toString() const
     {
         std::stringstream ss;
@@ -140,7 +119,15 @@ namespace ME
         {
             size_t step = 1;
             for (int dim : initList.arrayDims) step *= dim;
-            initArrayGlb(ss, dt, initList, 0, 0, step - 1);
+            size_t explicitCount = initList.initList.size();
+            while (explicitCount > 0)
+            {
+                const auto& tail = initList.initList[explicitCount - 1];
+                const auto  bits = dt == DataType::F32 ? FLOAT_TO_INT_BITS(tail.getFloat()) : tail.getInt();
+                if (bits != 0) break;
+                --explicitCount;
+            }
+            initArrayGlb(ss, dt, initList, 0, 0, step, explicitCount);
         }
         ss << getComment();
         return ss.str();

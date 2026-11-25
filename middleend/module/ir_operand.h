@@ -116,7 +116,7 @@ namespace ME
     {
       private:
         std::map<int, ImmeI32Operand*>        ImmeI32OperandMap;
-        std::map<float, ImmeF32Operand*>      ImmeF32OperandMap;
+        std::map<int, ImmeF32Operand*>        ImmeF32OperandMap;
         std::map<size_t, RegOperand*>         RegOperandMap;
         std::map<size_t, LabelOperand*>       LabelOperandMap;
         std::map<std::string, GlobalOperand*> GlobalOperandMap;
